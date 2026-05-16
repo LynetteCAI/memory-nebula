@@ -321,6 +321,23 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ mode, onToggle, onPhotosUp
       <div className="absolute top-8 right-8 w-16 h-16 border-t-2 border-r-2 border-[#D4AF37] opacity-50"></div>
       <div className="absolute bottom-8 left-8 w-16 h-16 border-b-2 border-l-2 border-[#D4AF37] opacity-50"></div>
       <div className="absolute bottom-8 right-8 w-16 h-16 border-b-2 border-r-2 border-[#D4AF37] opacity-50"></div>
+
+      {/* v0.3: Gesture & interaction hints */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 pointer-events-none">
+        <div className="flex flex-col items-center gap-1">
+          {hasPhotos && (
+            <p className="text-[#D4AF37]/50 font-serif text-xs tracking-wider text-center">
+              点击拍立得，查看这段回忆
+            </p>
+          )}
+          <p className="text-[#F5E6BF]/30 font-serif text-[10px] tracking-wider text-center">
+            张开手掌 · 释放记忆星云 &nbsp;|&nbsp; 握拳 · 收拢记忆核心
+          </p>
+          <p className="text-[#F5E6BF]/20 font-serif text-[10px] tracking-wider text-center">
+            双手进入画面 · 聚焦最近的照片
+          </p>
+        </div>
+      </div>
     </div>
   );
 };

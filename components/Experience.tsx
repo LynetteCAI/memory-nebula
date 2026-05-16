@@ -8,17 +8,33 @@ import { Foliage } from './Foliage';
 import { Ornaments } from './Ornaments';
 import { Polaroids } from './Polaroids';
 import { TreeStar } from './TreeStar';
-import { TreeMode } from '../types';
+import { TreeMode, MemoryPhoto } from '../types';
 
 interface ExperienceProps {
   mode: TreeMode;
   handPosition: { x: number; y: number; detected: boolean };
   uploadedPhotos: string[];
   twoHandsDetected: boolean;
-  onClosestPhotoChange?: (photoUrl: string | null) => void;
+  /** v0.3: MemoryPhoto objects for click-to-open */
+  memories?: MemoryPhoto[];
+  /** v0.3: Called when a polaroid is clicked to open the modal */
+  onPhotoSelect?: (photo: MemoryPhoto) => void;
+  /** v0.3: ID of the photo focused by two-hand detection (for highlight) */
+  focusedPhotoId?: string | null;
+  /** v0.3: Two-hand focus updates this callback with the focused memory ID */
+  onFocusedPhotoIdChange?: (id: string | null) => void;
 }
 
-export const Experience: React.FC<ExperienceProps> = ({ mode, handPosition, uploadedPhotos, twoHandsDetected, onClosestPhotoChange }) => {
+export const Experience: React.FC<ExperienceProps> = ({
+  mode,
+  handPosition,
+  uploadedPhotos,
+  twoHandsDetected,
+  memories,
+  onPhotoSelect,
+  focusedPhotoId,
+  onFocusedPhotoIdChange,
+}) => {
   const controlsRef = useRef<any>(null);
 
   // Update camera rotation based on hand position
@@ -103,7 +119,15 @@ export const Experience: React.FC<ExperienceProps> = ({ mode, handPosition, uplo
       <group position={[0, 0, 0]}>
         <Foliage mode={mode} count={12000} />
         <Ornaments mode={mode} count={600} />
-        <Polaroids mode={mode} uploadedPhotos={uploadedPhotos} twoHandsDetected={twoHandsDetected} onClosestPhotoChange={onClosestPhotoChange} />
+        <Polaroids
+          mode={mode}
+          uploadedPhotos={uploadedPhotos}
+          twoHandsDetected={twoHandsDetected}
+          memories={memories}
+          onPhotoSelect={onPhotoSelect}
+          focusedPhotoId={focusedPhotoId}
+          onFocusedPhotoIdChange={onFocusedPhotoIdChange}
+        />
         {/* <TreeStar mode={mode} /> */}
       </group>
 

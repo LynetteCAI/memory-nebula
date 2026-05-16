@@ -1,11 +1,12 @@
 
-import React, { useState, Suspense, useEffect } from 'react';
+import React, { useState, Suspense, useEffect, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Loader } from '@react-three/drei';
 import { Experience } from './components/Experience';
 import { UIOverlay } from './components/UIOverlay';
 import { GestureController } from './components/GestureController';
-import { TreeMode } from './types';
+import { MemoryModal } from './components/MemoryModal';
+import { TreeMode, MemoryPhoto, normalizeUploadToMemoryPhoto } from './types';
 
 // Simple Error Boundary to catch 3D resource loading errors (like textures)
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean}> {
@@ -52,7 +53,21 @@ export default function App() {
   const [isLoadingShare, setIsLoadingShare] = useState(false);
   const [isSharedView, setIsSharedView] = useState(false);
   const [twoHandsDetected, setTwoHandsDetected] = useState(false);
-  const [closestPhoto, setClosestPhoto] = useState<string | null>(null);
+  
+  // v0.3: Memory detail modal state
+  const [selectedMemory, setSelectedMemory] = useState<MemoryPhoto | null>(null);
+  // v0.3: Photo focused by two-hand detection (highlight only, doesn't open modal)
+  const [focusedPhotoId, setFocusedPhotoId] = useState<string | null>(null);
+
+  // v0.3: Pause gesture navigation when modal is open
+  const gestureNavigationEnabled = selectedMemory === null;
+
+  // v0.3: Derive MemoryPhoto[] from uploadedPhotos
+  const memories = useMemo<MemoryPhoto[]>(() => {
+    return uploadedPhotos.map((url, i) =>
+      normalizeUploadToMemoryPhoto(url, i, uploadedPhotos.length)
+    );
+  }, [uploadedPhotos]);
 
   // Check for share parameter in URL on mount
   useEffect(() => {
@@ -109,8 +124,10 @@ export default function App() {
     setTwoHandsDetected(detected);
   };
 
-  const handleClosestPhotoChange = (photoUrl: string | null) => {
-    setClosestPhoto(photoUrl);
+  // v0.3: Two-hand focus updates the focused photo ID (highlight only, no modal auto-open)
+  const handleFocusedPhotoIdChange = (id: string | null) => {
+    // Don't clear focus if user has a modal open manually
+    setFocusedPhotoId(id);
   };
 
   const handlePhotosUpload = (photos: string[]) => {
@@ -127,7 +144,16 @@ export default function App() {
           shadows
         >
           <Suspense fallback={null}>
-            <Experience mode={mode} handPosition={handPosition} uploadedPhotos={uploadedPhotos} twoHandsDetected={twoHandsDetected} onClosestPhotoChange={handleClosestPhotoChange} />
+            <Experience
+              mode={mode}
+              handPosition={handPosition}
+              uploadedPhotos={uploadedPhotos}
+              twoHandsDetected={twoHandsDetected}
+              memories={memories}
+              focusedPhotoId={focusedPhotoId}
+              onPhotoSelect={setSelectedMemory}
+              onFocusedPhotoIdChange={handleFocusedPhotoIdChange}
+            />
           </Suspense>
         </Canvas>
       </ErrorBoundary>
@@ -157,34 +183,28 @@ export default function App() {
         </div>
       )}
       
-      {/* Gesture Control Module */}
-      <GestureController currentMode={mode} onModeChange={setMode} onHandPosition={handleHandPosition} onTwoHandsDetected={handleTwoHandsDetected} />
+      {/* Gesture Control Module — v0.3: navigation paused when modal is open */}
+      <GestureController
+        currentMode={mode}
+        onModeChange={setMode}
+        onHandPosition={handleHandPosition}
+        onTwoHandsDetected={handleTwoHandsDetected}
+        gestureNavigationEnabled={gestureNavigationEnabled}
+      />
       
-      {/* Photo Overlay - Shows when two hands detected */}
-      {closestPhoto && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none animate-fade-in">
-          {/* Semi-transparent backdrop */}
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
-          
-          {/* Polaroid frame with photo */}
-          <div className="relative z-50 transform transition-all duration-500 ease-out animate-scale-in">
-            {/* Polaroid container */}
-            <div className="bg-white p-4 pb-8 shadow-2xl" style={{ width: '60vmin', maxWidth: '600px' }}>
-              {/* Gold clip at top */}
-              <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-12 h-6 bg-gradient-to-b from-[#D4AF37] to-[#C5A028] rounded-sm shadow-lg"></div>
-              
-              {/* Photo */}
-              <img 
-                src={closestPhoto} 
-                alt="Memory" 
-                className="w-full aspect-square object-cover"
-              />
-              
-              {/* Text label */}
-              <div className="text-center mt-4 font-serif text-gray-700 text-lg">
-                Memory
-              </div>
-            </div>
+      {/* v0.3: Memory Detail Modal — replaces old two-hand photo overlay */}
+      <MemoryModal
+        memory={selectedMemory}
+        onClose={() => setSelectedMemory(null)}
+      />
+      
+      {/* v0.3: Small hint when two hands are focusing a photo */}
+      {twoHandsDetected && focusedPhotoId && !selectedMemory && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-fade-in">
+          <div className="bg-black/60 backdrop-blur-sm border border-[#D4AF37]/30 rounded-full px-5 py-2">
+            <p className="text-[#D4AF37]/80 font-serif text-sm tracking-wide">
+              已聚焦一段回忆，点击照片查看详情
+            </p>
           </div>
         </div>
       )}
