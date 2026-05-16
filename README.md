@@ -1,112 +1,85 @@
-# 🎄 Grand Luxury Interactive Christmas Tree
+# 🌌 Memory Nebula
 
-An immersive, high-fidelity 3D Christmas tree experience featuring hand gesture control, dynamic chaos-to-order assembly, and luxurious emerald and gold aesthetics.
+一个通过手势唤醒回忆的 3D 记忆星云。握拳时，照片、光点与记忆尘埃坍缩成一个发光星云球；张开手掌时，它们散开成可以环绕探索的记忆空间。
 
-## 📝 Prompt
+## 📝 版本
 
-Gemini 3 in Google AI Studio and Claude 4.5 Sonnet in Cursor:
+**v0.1**：星云球替换圣诞树 — 保留全部手势交互、拍立得照片、粒子系统和 Bloom 后期处理，将聚合态从圣诞树圆锥改为紧致灵动的记忆星云球。
 
-```
-角色设定： 你是一位精通 React 19、TypeScript 和 Three.js (R3F) 的 3D 创意开发专家。 任务目标： 构建一个名为“豪华互动圣诞树 (Grand Luxury Interactive Christmas Tree)”的高保真 3D Web 应用。视觉风格需呈现“特朗普式”的奢华感，主色调为深祖母绿和高光金色，并伴有电影级的辉光效果。 技术栈： React 19, TypeScript, React Three Fiber, Drei, Postprocessing, Tailwind CSS。
-核心逻辑与架构： 状态机： 包含 CHAOS（混沌散落）和 FORMED（聚合成树）两种状态，并在两者间动态变形。 双坐标系统 (Dual-Position System)： 所有元素（针叶、装饰物）初始化时需分配两个坐标： ChaosPosition：球形空间内的随机坐标。 TargetPosition：构成树木圆锥形状的目标坐标。
-TargetPosition：构成树木圆锥形状的目标坐标。 在 useFrame 中根据进度 在两者间进行插值 (Lerp)。具体实现细节： 针叶系统 (Foliage)： 使用 THREE.Points 和自定义 ShaderMaterial 渲染大量粒子。 装饰物 (Ornaments)： 使用 InstancedMesh 优化渲染。分为各种颜色的礼物盒（重）、各种颜色的彩球（轻）、各种点缀灯光（极轻），赋予不同的物理推力权重。使用 Lerp 实现丝滑的归位动画。 后期处理： 启用 Bloom 效果（阈值 0.8，强度 1.2），营造“金色光晕”。
-场景配置： 摄像机位置 [0, 4, 20]，使用 Lobby HDRI 环境光。
-在里面加上很多拍立得样式的照片的装饰。
-使用摄像头图像检测手势，手势张开代表 unleash，闭上就变回圣诞树。通过手的移动可以调整视角。
-```
+## 🛠️ 快速开始
 
-## 🛠️ Installation
-
-1. **Clone the repository:**
+1. **克隆仓库:**
    ```bash
    git clone <repository-url>
-   cd grand-luxury-interactive-christmas-tree
+   cd christmas-tree
    ```
 
-2. **Install dependencies:**
+2. **安装依赖:**
    ```bash
    npm install
    ```
 
-3. **Run the development server:**
+3. **启动开发服务器:**
    ```bash
    npm run dev
    ```
    
-   > 📝 Note: Local dev mode uses localStorage for sharing (works in same browser only)
-   > For full cloud sharing, see step 4
+4. **打开浏览器:**
+   - 访问 `http://localhost:3010`
+   - 允许摄像头权限以启用手势控制
+   - 点击"上传回忆照片"上传你的照片
 
-4. **Configure Cloudflare (Optional - for cloud sharing):**
-   - Follow the detailed guide in `cloudflare-setup.md`
-   - Copy `env.example` to `.env.local` and fill in your Cloudflare credentials
-   - Use `npm run dev:vercel` to test with full Vercel environment
+## 🎯 使用指南
 
-5. **Open your browser:**
-   - Navigate to `http://localhost:3010`
-   - Allow camera access for gesture control
-   - Click "上传照片" to upload your photos
+### 手势控制
 
+1. **张开手掌（五指伸展）**：释放记忆，粒子散开
+2. **握拳**：收拢记忆，坍缩成星云球
+3. **移动手掌**：控制相机视角，环绕观察星云
+   - 左右：水平旋转
+   - 上下：垂直倾斜
 
-## 🎯 Usage
+### 鼠标控制
 
-### Photo Upload & Sharing
+- **拖拽**：旋转视角
+- **滚轮**：缩放
+- 手势未检测到时，鼠标控制完全可用
 
-1. **Upload Photos:**
-   - Click "上传照片" button to select up to 22 images
-   - Photos will appear as polaroids on the Christmas tree
+### 照片上传与分享
 
-2. **Generate Share Link:**
-   - After uploading photos, click "生成分享链接"
-   - Wait 2-3 seconds for the upload to complete
-   - Copy the generated link and share with friends
+1. **上传回忆照片**：点击按钮选择图片（最多 22 张）
+2. **生成记忆分享链接**：上传后点击生成，等待 2-3 秒
+3. **分享**：复制链接发送给朋友
+4. **查看分享**：朋友打开链接即可看到你的记忆星云
 
-3. **View Shared Photos:**
-   - Friends can open the share link in any browser
-   - Photos will automatically load on the Christmas tree
-   - No login or app installation required
-   - Links expire after 30 days
+## 🏗️ 技术栈
 
-### Gesture Controls
+- React 19 + TypeScript
+- React Three Fiber (R3F) 3D 渲染
+- Three.js WebGL 图形
+- @react-three/drei 辅助工具
+- @react-three/postprocessing 视觉特效
+- MediaPipe 手势检测
+- Tailwind CSS 样式
+- Vercel Serverless + Cloudflare R2/KV（分享）
 
-1. **Position your hand** in front of the webcam (visible in top-right preview)
-2. **Move your hand** to control the camera angle:
-   - Left/Right: Horizontal rotation
-   - Up/Down: Vertical tilt
-3. **Open your hand** (spread all fingers): Unleash chaos mode
-4. **Close your fist**: Restore tree to formed mode
+## 🗺️ 路线图
 
-### Mouse Controls
+- **v0.1** ✅ 星云球替换圣诞树
+- **v0.1.1** ✅ 去除残留圣诞装饰，将 ornaments 改成小星球、水晶碎片和星尘光点（当前）
+- **v0.2** 散开态变成记忆星云，而不是随机 chaos
+- **v0.3** 拍立得照片可点击，展示时间和文字
+- **v0.4** 新增时间隧道模式，先用按钮进入
+- **v0.5** 增加推手势进入时间隧道
+- **v0.6** 加纪念日终章、信件、音乐、分享
 
-When no hand is detected, you can:
-- **Click and drag** to rotate the view
-- **Scroll** to zoom in/out
-- **Right-click and drag** to pan (disabled by default)
+## ✨ 功能
 
-## 🏗️ Tech Stack
-
-### Frontend
-- React 19 with TypeScript
-- React Three Fiber (R3F) for 3D rendering
-- Three.js for WebGL graphics
-- @react-three/drei for helpers
-- @react-three/postprocessing for visual effects
-- MediaPipe for hand gesture detection
-- Tailwind CSS for styling
-
-### Backend (Photo Sharing)
-- Vercel Serverless Functions
-- Cloudflare R2 (S3-compatible object storage)
-- Cloudflare KV (key-value storage)
-- AWS SDK S3 Client for R2 integration
-
-### Features
-- Hand gesture control via webcam
-- Dynamic state transitions (CHAOS ↔ FORMED)
-- Photo upload and cloud sharing
-- Temporary share links (30-day expiration)
-- Instanced rendering for performance
-- Bloom and post-processing effects
-
-## 🎅 Happy Holidays!
-
-May your code be merry and bright! 🎄✨
+- 手部手势控制（摄像头）
+- 动态状态转换（散开 ↔ 聚合）
+- 照片上传与云端分享
+- 临时分享链接（30 天过期）
+- InstancedMesh 性能优化
+- Bloom 辉光后期处理
+- 粒子系统（Memory Dust / Nebula Dust）
+- 记忆核心（Memory Core）发光体

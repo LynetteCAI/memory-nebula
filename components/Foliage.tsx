@@ -2,6 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TreeMode } from '../types';
+import { getNebulaCorePosition } from '../utils/nebulaLayout';
 
 interface FoliageProps {
   mode: TreeMode;
@@ -34,10 +35,11 @@ const vertexShader = `
     // Interpolate position
     vec3 newPos = mix(aChaosPos, aTargetPos, easedProgress);
     
-    // Add a slight "breathing" wind effect when formed
+    // Add a subtle nebula drift / breathing effect when aggregated
     if (easedProgress > 0.9) {
-      newPos.x += sin(uTime * 2.0 + newPos.y) * 0.05;
-      newPos.z += cos(uTime * 1.5 + newPos.y) * 0.05;
+      newPos.x += sin(uTime * 1.3 + newPos.y * 1.7 + aRandom * 6.28) * 0.04;
+      newPos.y += cos(uTime * 1.1 + newPos.x * 1.3 + aRandom * 6.28) * 0.03;
+      newPos.z += cos(uTime * 1.5 + newPos.y * 1.5 + aRandom * 6.28) * 0.04;
     }
 
     vec4 mvPosition = modelViewMatrix * vec4(newPos, 1.0);
@@ -46,20 +48,37 @@ const vertexShader = `
     gl_PointSize = (4.0 * aRandom + 2.0) * (20.0 / -mvPosition.z);
     gl_Position = projectionMatrix * mvPosition;
 
-    // Color logic: Mix between Chaos Gold and Formed Emerald
-    vec3 goldColor = vec3(1.0, 0.84, 0.0);
-    vec3 emeraldColor = vec3(0.0, 0.4, 0.1);
-    vec3 brightGreen = vec3(0.1, 0.8, 0.2);
+    // Color logic: Mix between Chaos warm gold/amber and Formed Nebula palette
+    // Nebula colors: deep blue, champagne gold, violet, ivory, cyan mist
+    vec3 chaosGold = vec3(0.91, 0.69, 0.22);   // Warm amber-gold for chaos
+    vec3 nebulaBlue = vec3(0.04, 0.10, 0.23);   // Deep space blue
+    vec3 champagne = vec3(0.83, 0.69, 0.22);     // Champagne gold
+    vec3 nebulaViolet = vec3(0.42, 0.36, 0.58);  // Nebula violet
+    vec3 cyanMist = vec3(0.53, 0.80, 0.93);      // Cyan mist
+    vec3 ivory = vec3(0.96, 0.90, 0.75);         // Soft ivory
     
-    // Sparkle effect
-    float sparkle = sin(uTime * 5.0 + aRandom * 100.0);
-    vec3 finalGreen = mix(emeraldColor, brightGreen, aRandom * 0.3);
+    // Pick a base color per particle based on its random seed
+    float colorSelect = fract(aRandom * 7.13);
+    vec3 baseColor;
+    if (colorSelect < 0.30) {
+      baseColor = champagne;
+    } else if (colorSelect < 0.50) {
+      baseColor = nebulaViolet;
+    } else if (colorSelect < 0.65) {
+      baseColor = cyanMist;
+    } else if (colorSelect < 0.80) {
+      baseColor = ivory;
+    } else {
+      baseColor = nebulaBlue;
+    }
     
-    vColor = mix(goldColor, finalGreen, easedProgress);
+    // Mix chaos gold with nebula base color based on progress
+    vColor = mix(chaosGold, baseColor, easedProgress);
     
-    // Add sparkle to the tips
-    if (sparkle > 0.9) {
-      vColor += vec3(0.5);
+    // Subtle sparkle/twinkle effect
+    float sparkle = sin(uTime * 4.0 + aRandom * 100.0);
+    if (sparkle > 0.92) {
+      vColor += vec3(0.2, 0.15, 0.3);
     }
 
     vAlpha = 1.0;
@@ -94,30 +113,23 @@ export const Foliage: React.FC<FoliageProps> = ({ mode, count }) => {
     const target = new Float32Array(count * 3);
     const rnd = new Float32Array(count);
 
-    const goldenRatio = (1 + Math.sqrt(5)) / 2;
-    const height = 12;
-    const maxRadius = 5;
-
     for (let i = 0; i < count; i++) {
-      // 1. Chaos Positions: Random sphere
+      // 1. Chaos Positions: Random sphere (preserved from original - will be refined in v0.2)
       const r = 25 * Math.cbrt(Math.random());
       const theta = Math.random() * 2 * Math.PI;
       const phi = Math.acos(2 * Math.random() - 1);
       
       chaos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-      chaos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) + 5; // Lift up slightly
+      chaos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) + 5;
       chaos[i * 3 + 2] = r * Math.cos(phi);
 
-      // 2. Target Positions: Spiral Cone (Fibonacci Lattice on Cone)
-      // Normalized height 0 to 1
-      const yNorm = i / count; 
-      const y = yNorm * height;
-      const currentRadius = maxRadius * (1 - yNorm);
-      const angle = 2 * Math.PI * goldenRatio * i;
-
-      target[i * 3] = Math.cos(angle) * currentRadius;
-      target[i * 3 + 1] = y;
-      target[i * 3 + 2] = Math.sin(angle) * currentRadius;
+      // 2. Target Positions: Memory Nebula Core sphere (replaces Christmas tree cone)
+      // FORMED = Memory Core aggregated state
+      const nebulaPos = getNebulaCorePosition(i, count);
+      
+      target[i * 3] = nebulaPos.x;
+      target[i * 3 + 1] = nebulaPos.y;
+      target[i * 3 + 2] = nebulaPos.z;
 
       // 3. Randoms
       rnd[i] = Math.random();

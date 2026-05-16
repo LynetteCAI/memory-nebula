@@ -59,7 +59,7 @@ export const Experience: React.FC<ExperienceProps> = ({ mode, handPosition, uplo
       
       // Calculate new camera position in spherical coordinates
       const radius = controls.getDistance();
-      const targetY = 4; // Tree center height
+      const targetY = 0; // Nebula core center
       
       const x = radius * Math.sin(newPolar) * Math.sin(newAzimuth);
       const y = targetY + radius * Math.cos(newPolar);
@@ -85,33 +85,34 @@ export const Experience: React.FC<ExperienceProps> = ({ mode, handPosition, uplo
         enabled={true}
       />
 
-      {/* Lighting Setup for Maximum Luxury */}
-      <Environment preset="lobby" background={false} blur={0.8} />
+      {/* Lighting Setup for Deep Space Memory Nebula */}
+      <Environment preset="night" background={false} blur={0.8} />
       
-      <ambientLight intensity={0.2} color="#004422" />
+      <ambientLight intensity={0.25} color="#1a2a4a" /> {/* Deep navy ambient */}
       <spotLight 
-        position={[10, 20, 10]} 
-        angle={0.2} 
+        position={[8, 12, 8]} 
+        angle={0.3} 
         penumbra={1} 
-        intensity={2} 
-        color="#fff5cc" 
+        intensity={1.8} 
+        color="#D4AF37" 
         castShadow 
       />
-      <pointLight position={[-10, 5, -10]} intensity={1} color="#D4AF37" />
+      <pointLight position={[-8, 3, -8]} intensity={0.8} color="#6B5B95" /> {/* Violet fill */}
+      <pointLight position={[5, -2, 5]} intensity={0.5} color="#88CCEE" /> {/* Cyan rim */}
 
-      <group position={[0, -5, 0]}>
+      <group position={[0, 0, 0]}>
         <Foliage mode={mode} count={12000} />
         <Ornaments mode={mode} count={600} />
         <Polaroids mode={mode} uploadedPhotos={uploadedPhotos} twoHandsDetected={twoHandsDetected} onClosestPhotoChange={onClosestPhotoChange} />
         <TreeStar mode={mode} />
         
-        {/* Floor Reflections */}
+        {/* Subtle floating shadow - reduced prominence */}
         <ContactShadows 
-          opacity={0.7} 
-          scale={30} 
-          blur={2} 
-          far={4.5} 
-          color="#000000" 
+          opacity={0.3} 
+          scale={20} 
+          blur={3} 
+          far={5} 
+          color="#0a0a1a" 
         />
       </group>
 

@@ -1,14 +1,16 @@
-import React, { useMemo, useRef, useState, useLayoutEffect } from 'react';
+import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TreeMode } from '../types';
+import { getNebulaOrnamentPosition } from '../utils/nebulaLayout';
 
 interface OrnamentsProps {
   mode: TreeMode;
   count: number;
 }
 
-type OrnamentType = 'ball' | 'gift' | 'light';
+// Memory Nebula ornament types
+type OrnamentType = 'planet' | 'crystal' | 'stardust';
 
 interface InstanceData {
   chaosPos: THREE.Vector3;
@@ -20,55 +22,47 @@ interface InstanceData {
   rotationOffset: THREE.Euler;
 }
 
+/**
+ * Nebula ornament colors — pale, translucent, cosmic.
+ * No Christmas red/green.
+ */
+const NEBULA_ORNAMENT_COLORS = {
+  paleBlue:    new THREE.Color('#A8C8E8'),
+  cyanMist:    new THREE.Color('#88CCEE'),
+  violet:      new THREE.Color('#6B5B95'),
+  champagne:   new THREE.Color('#D4AF37'),
+  ivory:       new THREE.Color('#F5E6BF'),
+  roseGold:    new THREE.Color('#B76E79'),
+  softAmber:   new THREE.Color('#E8A860'),
+};
+
 export const Ornaments: React.FC<OrnamentsProps> = ({ mode, count }) => {
-  // We use 3 separate InstancedMeshes for different geometries/materials to reduce draw calls
-  // but allow unique shapes.
-  const ballsRef = useRef<THREE.InstancedMesh>(null);
-  const giftsRef = useRef<THREE.InstancedMesh>(null);
-  const lightsRef = useRef<THREE.InstancedMesh>(null);
+  // 3 InstancedMeshes for different geometries: mini planets, crystal shards, stardust lights
+  const planetsRef = useRef<THREE.InstancedMesh>(null);
+  const crystalsRef = useRef<THREE.InstancedMesh>(null);
+  const stardustRef = useRef<THREE.InstancedMesh>(null);
   
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   // Generate data once
-  const { ballsData, giftsData, lightsData } = useMemo(() => {
-    const _balls: InstanceData[] = [];
-    const _gifts: InstanceData[] = [];
-    const _lights: InstanceData[] = [];
-
-    const height = 11; // Slightly smaller than foliage
-    const maxRadius = 4.5;
+  const { planetsData, crystalsData, stardustData } = useMemo(() => {
+    const _planets: InstanceData[] = [];
+    const _crystals: InstanceData[] = [];
+    const _stardust: InstanceData[] = [];
     
-    // Luxury Colors
-    const gold = new THREE.Color("#D4AF37");
-    const red = new THREE.Color("#8B0000"); // Dark Velvet Red
-    const emerald = new THREE.Color("#004422");
-    const whiteGold = new THREE.Color("#F5E6BF");
-    
-    const palette = [gold, red, gold, whiteGold];
+    const { paleBlue, cyanMist, violet, champagne, ivory, roseGold, softAmber } = NEBULA_ORNAMENT_COLORS;
+    const palette = [champagne, ivory, champagne, roseGold, paleBlue, violet, softAmber, ivory, cyanMist, paleBlue];
 
     for (let i = 0; i < count; i++) {
       const rnd = Math.random();
-      let type: OrnamentType = 'ball';
-      if (rnd > 0.8) type = 'gift';
-      if (rnd > 0.9) type = 'light'; // Less lights as geometry, more via bloom
+      let type: OrnamentType = 'planet';
+      if (rnd > 0.75) type = 'crystal';
+      if (rnd > 0.90) type = 'stardust';
 
-      // 1. Target Position (Spiral with heavy density at bottom)
-      // Use power function to bias distribution toward bottom (lower yNorm values)
-      const yNorm = Math.pow(Math.random(), 2.5); // Heavy concentration at bottom
-      const y = yNorm * height + 0.5;
-      const rScale = (1 - yNorm);
-      const theta = y * 10 + Math.random() * Math.PI * 2; // Wind around
-      
-      // Push ornaments slightly outside the foliage radius
-      const r = maxRadius * rScale + (Math.random() * 0.5);
-      
-      const targetPos = new THREE.Vector3(
-        r * Math.cos(theta),
-        y,
-        r * Math.sin(theta)
-      );
+      // Target Position: Memory Nebula Core sphere
+      const targetPos = getNebulaOrnamentPosition(i, count);
 
-      // 2. Chaos Position
+      // Chaos Position
       const cR = 15 + Math.random() * 15;
       const cTheta = Math.random() * Math.PI * 2;
       const cPhi = Math.acos(2 * Math.random() - 1);
@@ -78,8 +72,17 @@ export const Ornaments: React.FC<OrnamentsProps> = ({ mode, count }) => {
         cR * Math.cos(cPhi)
       );
 
-      const scale = type === 'light' ? 0.15 : (0.2 + Math.random() * 0.25);
-      const color = type === 'light' ? new THREE.Color("#FFFFAA") : palette[Math.floor(Math.random() * palette.length)];
+      // Scales: stardust tiny, crystals medium, planets slightly larger
+      const scale = type === 'stardust' 
+        ? 0.06 + Math.random() * 0.08 
+        : type === 'crystal' 
+          ? 0.12 + Math.random() * 0.16 
+          : 0.14 + Math.random() * 0.18;
+      
+      // Colors: stardust gets softer warm/cool tones, others from palette
+      const color = type === 'stardust' 
+        ? [ivory, cyanMist, new THREE.Color('#FFEEDD'), champagne][Math.floor(Math.random() * 4)]
+        : palette[Math.floor(Math.random() * palette.length)];
 
       const data: InstanceData = {
         chaosPos,
@@ -87,24 +90,24 @@ export const Ornaments: React.FC<OrnamentsProps> = ({ mode, count }) => {
         type,
         color,
         scale,
-        speed: 0.5 + Math.random() * 1.5, // Random speed for physics feel
+        speed: 0.5 + Math.random() * 1.5,
         rotationOffset: new THREE.Euler(Math.random() * Math.PI, Math.random() * Math.PI, 0)
       };
 
-      if (type === 'ball') _balls.push(data);
-      else if (type === 'gift') _gifts.push(data);
-      else _lights.push(data);
+      if (type === 'planet') _planets.push(data);
+      else if (type === 'crystal') _crystals.push(data);
+      else _stardust.push(data);
     }
 
-    return { ballsData: _balls, giftsData: _gifts, lightsData: _lights };
+    return { planetsData: _planets, crystalsData: _crystals, stardustData: _stardust };
   }, [count]);
 
   useLayoutEffect(() => {
-    // Set initial colors
+    // Set initial colors on each InstancedMesh
     [
-      { ref: ballsRef, data: ballsData },
-      { ref: giftsRef, data: giftsData },
-      { ref: lightsRef, data: lightsData }
+      { ref: planetsRef, data: planetsData },
+      { ref: crystalsRef, data: crystalsData },
+      { ref: stardustRef, data: stardustData }
     ].forEach(({ ref, data }) => {
       if (ref.current) {
         data.forEach((d, i) => {
@@ -113,7 +116,7 @@ export const Ornaments: React.FC<OrnamentsProps> = ({ mode, count }) => {
         ref.current.instanceColor!.needsUpdate = true;
       }
     });
-  }, [ballsData, giftsData, lightsData]);
+  }, [planetsData, crystalsData, stardustData]);
 
   useFrame((state, delta) => {
     const isFormed = mode === TreeMode.FORMED;
@@ -168,25 +171,33 @@ export const Ornaments: React.FC<OrnamentsProps> = ({ mode, count }) => {
         const step = delta * d.speed;
         dummy.position.lerp(dest, step);
 
-        // Add wobble when formed
+        // Add nebula drift when formed
         if (isFormed && dummy.position.distanceTo(d.targetPos) < 0.5) {
-          dummy.position.y += Math.sin(time * 2 + d.chaosPos.x) * 0.002;
+          dummy.position.x += Math.sin(time * 1.2 + d.chaosPos.x * 2) * 0.003;
+          dummy.position.y += Math.cos(time * 1.0 + d.chaosPos.y * 2) * 0.002;
+          dummy.position.z += Math.cos(time * 1.3 + d.chaosPos.z * 2) * 0.003;
         }
 
-        // Rotation
-        if (d.type === 'gift') {
-           dummy.rotation.x += delta * 0.5;
-           dummy.rotation.y += delta * 0.2;
+        // Rotation per type
+        if (d.type === 'crystal') {
+          // Crystal shards: gentle continuous spin
+          dummy.rotation.x += delta * 0.35;
+          dummy.rotation.y += delta * 0.25;
+          dummy.rotation.z += delta * 0.15;
+        } else if (d.type === 'planet') {
+          // Mini planets: very slow rotation, face outward
+          dummy.rotation.y += delta * 0.08;
+          dummy.lookAt(0, 0, 0);
         } else {
-           // Balls face out
-           dummy.lookAt(0, dummy.position.y, 0);
+          // Stardust: face outward with subtle wobble
+          dummy.lookAt(0, 0, 0);
         }
 
         dummy.scale.setScalar(d.scale);
-        if (d.type === 'light') {
-           // Pulsate lights
-           const pulse = 1 + Math.sin(time * 5 + d.chaosPos.y) * 0.3;
-           dummy.scale.multiplyScalar(pulse);
+        if (d.type === 'stardust') {
+          // Subtle twinkle
+          const twinkle = 1 + Math.sin(time * 4 + d.chaosPos.y * 3) * 0.2;
+          dummy.scale.multiplyScalar(twinkle);
         }
 
         dummy.updateMatrix();
@@ -197,41 +208,45 @@ export const Ornaments: React.FC<OrnamentsProps> = ({ mode, count }) => {
       if (needsUpdate) ref.current.instanceMatrix.needsUpdate = true;
     };
 
-    updateMesh(ballsRef, ballsData);
-    updateMesh(giftsRef, giftsData);
-    updateMesh(lightsRef, lightsData);
+    updateMesh(planetsRef, planetsData);
+    updateMesh(crystalsRef, crystalsData);
+    updateMesh(stardustRef, stardustData);
   });
 
   return (
     <>
-      {/* Balls: High Gloss Gold/Red */}
-      <instancedMesh ref={ballsRef} args={[undefined, undefined, ballsData.length]}>
+      {/* Mini Planets: translucent low-saturation spheres orbiting the nebula core */}
+      <instancedMesh ref={planetsRef} args={[undefined, undefined, planetsData.length]}>
         <sphereGeometry args={[1, 32, 32]} />
         <meshStandardMaterial 
-          roughness={0.1} 
-          metalness={0.9} 
-          envMapIntensity={1.5}
+          roughness={0.2} 
+          metalness={0.3} 
+          transparent
+          opacity={0.55}
+          envMapIntensity={0.8}
         />
       </instancedMesh>
 
-      {/* Gifts: Cubes with ribbons (simplified as cubes) */}
-      <instancedMesh ref={giftsRef} args={[undefined, undefined, giftsData.length]}>
-        <boxGeometry args={[1, 1, 1]} />
+      {/* Crystal Shards: memory crystals — octahedron fragments with glassy feel */}
+      <instancedMesh ref={crystalsRef} args={[undefined, undefined, crystalsData.length]}>
+        <octahedronGeometry args={[0.9, 0]} />
         <meshStandardMaterial 
-          roughness={0.3} 
-          metalness={0.5} 
-          color="#white" // Tinted by instance color
+          roughness={0.15} 
+          metalness={0.1} 
+          transparent
+          opacity={0.5}
         />
       </instancedMesh>
 
-      {/* Lights: Emissive small spheres */}
-      <instancedMesh ref={lightsRef} args={[undefined, undefined, lightsData.length]}>
-        <sphereGeometry args={[1, 8, 8]} />
+      {/* Stardust Lights: tiny emissive memory light dust */}
+      <instancedMesh ref={stardustRef} args={[undefined, undefined, stardustData.length]}>
+        <sphereGeometry args={[1, 6, 6]} />
         <meshStandardMaterial 
           emissive="white"
-          emissiveIntensity={2}
+          emissiveIntensity={1.5}
           toneMapped={false}
-          color="white" // Tinted by instance color (yellowish)
+          transparent
+          opacity={0.7}
         />
       </instancedMesh>
     </>

@@ -221,9 +221,12 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ mode, onToggle, onPhotosUp
       
       {/* Header */}
       <header className="absolute top-8 left-1/2 transform -translate-x-1/2 flex flex-col items-center">
-        <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[#D4AF37] via-[#F5E6BF] to-[#D4AF37] font-serif drop-shadow-lg tracking-wider text-center">
-          Merry Christmas
+        <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[#D4AF37] via-[#E8C860] to-[#D4AF37] font-serif drop-shadow-lg tracking-wider text-center">
+          Memory Nebula
         </h1>
+        <p className="text-[#F5E6BF]/60 font-serif text-sm md:text-base tracking-[0.2em] mt-2 text-center">
+          记忆星云
+        </p>
       </header>
 
       {/* Right Bottom Action Area */}
@@ -239,14 +242,14 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ mode, onToggle, onPhotosUp
           className="hidden"
         />
 
-        {/* Shared View: Show "制作我的圣诞树" button */}
+        {/* Shared View: Show "创建我的记忆星云" button */}
         {isSharedView && (
           <button
             onClick={handleCreateMine}
             className="group px-6 py-3 border-2 border-[#D4AF37] bg-black/70 backdrop-blur-md overflow-hidden transition-all duration-500 hover:shadow-[0_0_30px_#D4AF37] hover:border-[#fff] hover:bg-[#D4AF37]/20"
           >
             <span className="relative z-10 font-serif text-base md:text-lg text-[#D4AF37] tracking-[0.1em] group-hover:text-white transition-colors whitespace-nowrap">
-              制作我的圣诞树
+              创建我的记忆星云
             </span>
           </button>
         )}
@@ -261,7 +264,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ mode, onToggle, onPhotosUp
                 className="group px-6 py-3 border-2 border-[#D4AF37] bg-black/70 backdrop-blur-md overflow-hidden transition-all duration-500 hover:shadow-[0_0_30px_#D4AF37] hover:border-[#fff] hover:bg-[#D4AF37]/20"
               >
                 <span className="relative z-10 font-serif text-base md:text-lg text-[#D4AF37] tracking-[0.1em] group-hover:text-white transition-colors whitespace-nowrap">
-                  上传照片
+                  上传回忆照片
                 </span>
               </button>
             )}
@@ -275,7 +278,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ mode, onToggle, onPhotosUp
                   className="group px-6 py-3 border-2 border-[#D4AF37] bg-black/70 backdrop-blur-md overflow-hidden transition-all duration-500 hover:shadow-[0_0_30px_#D4AF37] hover:border-[#fff] hover:bg-[#D4AF37]/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="relative z-10 font-serif text-base md:text-lg text-[#D4AF37] tracking-[0.1em] group-hover:text-white transition-colors whitespace-nowrap">
-                    {uploadProgress || (isSharing ? '生成中...' : '生成分享链接')}
+                    {uploadProgress || (isSharing ? '生成中...' : '生成记忆分享链接')}
                   </span>
                 </button>
                 {shareError && (
@@ -287,7 +290,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ mode, onToggle, onPhotosUp
             {/* Share Link Display - Show after link is generated */}
             {shareLink && (
               <div className="bg-black/80 backdrop-blur-md border-2 border-[#D4AF37] p-4 max-w-sm">
-                <p className="text-[#F5E6BF] font-serif text-sm mb-2">分享链接已生成</p>
+                <p className="text-[#F5E6BF] font-serif text-sm mb-2">记忆分享链接已生成</p>
                 <div className="flex items-center gap-2 mb-2">
                   <input
                     type="text"

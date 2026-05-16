@@ -118,11 +118,11 @@ export default function App() {
   };
 
   return (
-    <div className="w-full h-screen relative bg-gradient-to-b from-black via-[#001a0d] to-[#0a2f1e]">
+    <div className="w-full h-screen relative bg-gradient-to-b from-black via-[#0a0a1a] to-[#0d1b2a]">
       <ErrorBoundary>
         <Canvas
           dpr={[1, 2]}
-          camera={{ position: [0, 4, 20], fov: 45 }}
+          camera={{ position: [0, 2, 14], fov: 45 }}
           gl={{ antialias: false, stencil: false, alpha: false }}
           shadows
         >
@@ -176,13 +176,13 @@ export default function App() {
               {/* Photo */}
               <img 
                 src={closestPhoto} 
-                alt="Selected Memory" 
+                alt="Memory" 
                 className="w-full aspect-square object-cover"
               />
               
               {/* Text label */}
               <div className="text-center mt-4 font-serif text-gray-700 text-lg">
-                Happy Memories
+                Memory
               </div>
             </div>
           </div>

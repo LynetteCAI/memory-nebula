@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { TreeMode } from '../types';
+import { getNebulaPhotoPosition } from '../utils/nebulaLayout';
 
 /**
  * ==================================================================================
@@ -80,30 +81,25 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
 
     // 2. Rotation & Sway Logic
     if (isFormed) {
-        // Look at center but face outward
+        // Face outward from nebula core center
         const dummy = new THREE.Object3D();
         dummy.position.copy(groupRef.current.position);
-        dummy.lookAt(0, groupRef.current.position.y, 0); 
+        dummy.lookAt(0, 0, 0); // Look at nebula core center
         dummy.rotateY(Math.PI); // Flip to face out
         
         // Base rotation alignment
         groupRef.current.quaternion.slerp(dummy.quaternion, step);
         
-        // Physical Swaying (Wind)
-        // Z-axis rotation for side-to-side swing
-        const swayAngle = Math.sin(time * 2.0 + swayOffset) * 0.08;
-        // X-axis rotation for slight front-back tilt
-        const tiltAngle = Math.cos(time * 1.5 + swayOffset) * 0.05;
+        // Gentle nebula float / sway
+        const swayAngle = Math.sin(time * 1.5 + swayOffset) * 0.06;
+        const tiltAngle = Math.cos(time * 1.2 + swayOffset) * 0.04;
         
-        groupRef.current.rotateZ(swayAngle * delta * 5); // Apply over time or directly? 
-        // For stable sway, we add to the base rotation calculated above.
-        // But since we slerp quaternion, let's just add manual rotation after slerp?
-        // Easier: Set rotation directly based on dummy + sway.
+        groupRef.current.rotateZ(swayAngle * delta * 5);
         
         // Calculate the "perfect" rotation
         const currentRot = new THREE.Euler().setFromQuaternion(groupRef.current.quaternion);
-        groupRef.current.rotation.z = currentRot.z + swayAngle * 0.05; 
-        groupRef.current.rotation.x = currentRot.x + tiltAngle * 0.05;
+        groupRef.current.rotation.z = currentRot.z + swayAngle * 0.04; 
+        groupRef.current.rotation.x = currentRot.x + tiltAngle * 0.04;
         
     } else {
         // Chaos mode - face toward camera with gentle floating
@@ -129,15 +125,15 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
   });
 
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} scale={[0.65, 0.65, 0.65]}>
       
-      {/* The Hanging String (Visual only) - fades out at top */}
-      <mesh position={[0, 1.2, -0.1]}>
-        <cylinderGeometry args={[0.005, 0.005, 1.5]} />
-        <meshStandardMaterial color="#D4AF37" metalness={1} roughness={0.2} transparent opacity={0.6} />
+      {/* Orbital tether - subtle glowing thread connecting photo to nebula core */}
+      <mesh position={[0, 0.5, -0.1]}>
+        <cylinderGeometry args={[0.003, 0.003, 0.8]} />
+        <meshStandardMaterial color="#D4AF37" metalness={1} roughness={0.2} transparent opacity={0.4} />
       </mesh>
 
-      {/* Frame Group (Offset slightly so string connects to top center) */}
+      {/* Frame Group */}
       <group position={[0, 0, 0]}>
         
         {/* White Paper Backing */}
@@ -152,12 +148,11 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
           {texture && !error ? (
             <meshBasicMaterial map={texture} />
           ) : (
-            // Fallback Material (Red for error, Grey for loading)
             <meshStandardMaterial color={error ? "#550000" : "#cccccc"} />
           )}
         </mesh>
         
-        {/* "Tape" or Gold Clip */}
+        {/* Gold Memory Clip */}
         <mesh position={[0, 0.7, 0.025]} rotation={[0,0,0]}>
            <boxGeometry args={[0.1, 0.05, 0.05]} />
            <meshStandardMaterial color="#D4AF37" metalness={1} roughness={0.2} />
@@ -171,7 +166,7 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
           anchorX="center"
           anchorY="middle"
         >
-          {error ? "Image not found" : "Happy Memories"}
+          {error ? "Image not found" : "Memory"}
         </Text>
       </group>
     </group>
@@ -189,44 +184,25 @@ export const Polaroids: React.FC<PolaroidsProps> = ({ mode, uploadedPhotos, twoH
     }
 
     const data: PhotoData[] = [];
-    const height = 9; // Range of height on tree
-    const maxRadius = 5.0; // Slightly outside the foliage radius (which is approx 5 at bottom)
-    
     const count = uploadedPhotos.length;
 
     for (let i = 0; i < count; i++) {
-      // 1. Target Position
-      // Distributed nicely on the cone surface
-      const yNorm = 0.2 + (i / count) * 0.6; // Keep between 20% and 80% height
-      const y = yNorm * height;
-      
-      // Radius decreases as we go up
-      const r = maxRadius * (1 - yNorm) + 0.8; // +0.8 to ensure it floats OUTSIDE leaves
-      
-      // Golden Angle Spiral for even distribution
-      const theta = i * 2.39996; // Golden angle in radians
-      
-      const targetPos = new THREE.Vector3(
-        r * Math.cos(theta),
-        y,
-        r * Math.sin(theta)
-      );
+      // 1. Target Position: Memory Nebula outer orbit (replaces Christmas tree cone distribution)
+      // FORMED = Memory Core aggregated state - photos orbit the nebula core
+      const targetPos = getNebulaPhotoPosition(i, count);
 
       // 2. Chaos Position - Spread out and closer to camera
-      // Camera is at [0, 4, 20], Scene group offset is [0, -5, 0]
-      // So relative to scene, camera is at y=9
-      const relativeY = 5; // Lower position for better visibility
-      const relativeZ = 20; // Camera Z
+      const relativeY = 5;
+      const relativeZ = 20;
       
-      // Create positions spread widely around camera, very close
-      const angle = (i / count) * Math.PI * 2; // Distribute evenly
-      const distance = 3 + Math.random() * 4; // Distance 3-7 units (very close)
-      const heightSpread = (Math.random() - 0.5) * 8; // Height variation -4 to +4 (more spread)
+      const angle = (i / count) * Math.PI * 2;
+      const distance = 3 + Math.random() * 4;
+      const heightSpread = (Math.random() - 0.5) * 8;
       
       const chaosPos = new THREE.Vector3(
-        distance * Math.cos(angle) * 1.2, // X spread wider
-        relativeY + heightSpread, // More vertical spread
-        relativeZ - 4 + distance * Math.sin(angle) * 0.5 // Very close to camera (Z ~16-19)
+        distance * Math.cos(angle) * 1.2,
+        relativeY + heightSpread,
+        relativeZ - 4 + distance * Math.sin(angle) * 0.5
       );
 
       data.push({
@@ -234,7 +210,7 @@ export const Polaroids: React.FC<PolaroidsProps> = ({ mode, uploadedPhotos, twoH
         url: uploadedPhotos[i],
         chaosPos,
         targetPos,
-        speed: 0.8 + Math.random() * 1.5 // Variable speed
+        speed: 0.8 + Math.random() * 1.5
       });
     }
     return data;
