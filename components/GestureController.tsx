@@ -3,25 +3,64 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import { TreeMode } from '../types';
 
+// ---------------------------------------------------------------------------
+// v0.2.1 Gesture Stabilization Constants
+// ---------------------------------------------------------------------------
+
+/** How long a gesture must be held steadily before it triggers a mode switch */
+const GESTURE_HOLD_MS = 500;
+
+/** Cooldown after a mode switch before another switch is allowed */
+const GESTURE_COOLDOWN_MS = 1000;
+
+/** How long an ambiguous/unknown gesture is tolerated before resetting the hold timer */
+const GESTURE_UNKNOWN_RESET_MS = 300;
+
+/** Dead zone fraction: hand movements within ±DEAD_ZONE from center are ignored */
+const NAVIGATION_DEAD_ZONE = 0.08;
+
+type RawGesture = 'open' | 'fist' | 'unknown' | 'none';
+
 interface GestureControllerProps {
   onModeChange: (mode: TreeMode) => void;
   currentMode: TreeMode;
   onHandPosition?: (x: number, y: number, detected: boolean) => void;
   onTwoHandsDetected?: (detected: boolean) => void;
+  /** Pause gesture-driven camera navigation (e.g. when a detail modal is open). v0.3 hook. */
+  gestureNavigationEnabled?: boolean;
 }
 
-export const GestureController: React.FC<GestureControllerProps> = ({ onModeChange, currentMode, onHandPosition, onTwoHandsDetected }) => {
+export const GestureController: React.FC<GestureControllerProps> = ({ 
+  onModeChange, 
+  currentMode, 
+  onHandPosition, 
+  onTwoHandsDetected,
+  gestureNavigationEnabled = true,
+}) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [gestureStatus, setGestureStatus] = useState<string>("Initializing...");
+  const [gestureStatus, setGestureStatus] = useState<string>('Initializing...');
   const [handPos, setHandPos] = useState<{ x: number; y: number } | null>(null);
-  const lastModeRef = useRef<TreeMode>(currentMode);
   
-  // Debounce logic refs
-  const openFrames = useRef(0);
-  const closedFrames = useRef(0);
-  const CONFIDENCE_THRESHOLD = 5; // Number of consecutive frames to confirm gesture
+  // Keep a ref to currentMode for the rAF closure
+  const currentModeRef = useRef<TreeMode>(currentMode);
+  
+  // -------------------------------------------------------------------------
+  // v0.2.1 Stable-hold trigger state (replaces old frame-count debounce)
+  // -------------------------------------------------------------------------
+  const holdState = useRef({
+    candidateGesture: 'none' as RawGesture,
+    candidateSince: 0,         // performance.now() when candidate was first seen
+    lastUnknownSince: 0,       // when we last entered 'unknown' state
+    lastTriggeredAt: 0,        // performance.now() when last mode switch fired
+    lastTriggeredGesture: 'none' as RawGesture,
+    triggerConsumed: false,    // has this hold already triggered? (prevent re-fire)
+  });
+
+  useEffect(() => {
+    currentModeRef.current = currentMode;
+  }, [currentMode]);
 
   useEffect(() => {
     let handLandmarker: HandLandmarker | null = null;
@@ -166,10 +205,12 @@ export const GestureController: React.FC<GestureControllerProps> = ({ onModeChan
           const landmarks = result.landmarks[0];
           detectGesture(landmarks);
         } else {
-            setGestureStatus("No hand detected");
-            setHandPos(null); // Clear hand position when no hand detected
+            // v0.2.1: Hand lost — do NOT change mode, just stop navigation
+            const modeName = currentModeRef.current === TreeMode.CHAOS ? 'Constellation' : 'Core';
+            setGestureStatus(`No hand — ${modeName} locked`);
+            setHandPos(null);
             if (onHandPosition) {
-              onHandPosition(0.5, 0.5, false); // No hand detected
+              onHandPosition(0.5, 0.5, false);
             }
             if (onTwoHandsDetected) {
               onTwoHandsDetected(false);
@@ -181,10 +222,14 @@ export const GestureController: React.FC<GestureControllerProps> = ({ onModeChan
                 ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
               }
             }
-            // Reset counters if hand is lost? 
-            // Better to keep them to prevent flickering if hand blips out for 1 frame
-            openFrames.current = Math.max(0, openFrames.current - 1);
-            closedFrames.current = Math.max(0, closedFrames.current - 1);
+            // Reset hold state to 'none' so next detection starts fresh
+            // (but don't reset cooldown — that's time-based)
+            const hs = holdState.current;
+            if (hs.candidateGesture !== 'none') {
+              hs.candidateGesture = 'none';
+              hs.candidateSince = performance.now();
+              hs.triggerConsumed = false;
+            }
         }
       }
 
@@ -199,17 +244,31 @@ export const GestureController: React.FC<GestureControllerProps> = ({ onModeChan
       const wrist = landmarks[0];
       
       // Calculate palm center (average of wrist and finger bases)
-      // Finger bases (MCP joints): 5, 9, 13, 17
       const palmCenterX = (landmarks[0].x + landmarks[5].x + landmarks[9].x + landmarks[13].x + landmarks[17].x) / 5;
       const palmCenterY = (landmarks[0].y + landmarks[5].y + landmarks[9].y + landmarks[13].y + landmarks[17].y) / 5;
+
+      // -----------------------------------------------------------------------
+      // v0.2.1 Hand position → camera navigation with dead zone
+      // -----------------------------------------------------------------------
+      // Apply dead zone: ignore small movements around center to reduce jitter
+      const offsetX = palmCenterX - 0.5;
+      const offsetY = palmCenterY - 0.5;
+      const deadX = Math.abs(offsetX) < NAVIGATION_DEAD_ZONE ? 0.5 : palmCenterX;
+      const deadY = Math.abs(offsetY) < NAVIGATION_DEAD_ZONE ? 0.5 : palmCenterY;
       
-      // Send hand position for camera control
-      // Normalize coordinates: x and y are in [0, 1], center at (0.5, 0.5)
-      setHandPos({ x: palmCenterX, y: palmCenterY });
-      if (onHandPosition) {
-        onHandPosition(palmCenterX, palmCenterY, true);
+      setHandPos({ x: deadX, y: deadY });
+      
+      // Only send navigation updates when navigation is enabled (v0.3 hook)
+      if (onHandPosition && gestureNavigationEnabled) {
+        onHandPosition(deadX, deadY, true);
+      } else if (onHandPosition && !gestureNavigationEnabled) {
+        // Navigation paused but hand IS detected — signal presence without position
+        onHandPosition(0.5, 0.5, false);
       }
       
+      // -----------------------------------------------------------------------
+      // v0.2.1 Determine raw gesture type
+      // -----------------------------------------------------------------------
       const fingerTips = [8, 12, 16, 20];
       const fingerBases = [5, 9, 13, 17];
       
@@ -218,13 +277,9 @@ export const GestureController: React.FC<GestureControllerProps> = ({ onModeChan
       for (let i = 0; i < 4; i++) {
         const tip = landmarks[fingerTips[i]];
         const base = landmarks[fingerBases[i]];
-        
-        // Calculate distance from wrist to tip vs wrist to base
         const distTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
         const distBase = Math.hypot(base.x - wrist.x, base.y - wrist.y);
-        
-        // Heuristic: If tip is significantly further from wrist than base, it's extended
-        if (distTip > distBase * 1.5) { // 1.5 multiplier is a safe heuristic for extension
+        if (distTip > distBase * 1.5) {
           extendedFingers++;
         }
       }
@@ -236,39 +291,93 @@ export const GestureController: React.FC<GestureControllerProps> = ({ onModeChan
       const distThumbBase = Math.hypot(thumbBase.x - wrist.x, thumbBase.y - wrist.y);
       if (distThumbTip > distThumbBase * 1.2) extendedFingers++;
 
-      // DECISION
+      // Determine raw gesture
+      let rawGesture: RawGesture;
       if (extendedFingers >= 4) {
-        // OPEN HAND -> UNLEASH (CHAOS)
-        openFrames.current++;
-        closedFrames.current = 0;
-        
-        setGestureStatus("Detected: OPEN (Release Memory)");
-
-        if (openFrames.current > CONFIDENCE_THRESHOLD) {
-            if (lastModeRef.current !== TreeMode.CHAOS) {
-                lastModeRef.current = TreeMode.CHAOS;
-                onModeChange(TreeMode.CHAOS);
-            }
-        }
-
+        rawGesture = 'open';
       } else if (extendedFingers <= 1) {
-        // CLOSED FIST -> COLLAPSE TO CORE
-        closedFrames.current++;
-        openFrames.current = 0;
-        
-        setGestureStatus("Detected: CLOSED (Gather Core)");
-
-        if (closedFrames.current > CONFIDENCE_THRESHOLD) {
-            if (lastModeRef.current !== TreeMode.FORMED) {
-                lastModeRef.current = TreeMode.FORMED;
-                onModeChange(TreeMode.FORMED);
-            }
-        }
+        rawGesture = 'fist';
       } else {
-        // Ambiguous
-        setGestureStatus("Detected: ...");
-        openFrames.current = 0;
-        closedFrames.current = 0;
+        rawGesture = 'unknown';
+      }
+
+      // -----------------------------------------------------------------------
+      // v0.2.1 Stable-hold trigger logic (replaces old frame-counter system)
+      // -----------------------------------------------------------------------
+      const now = performance.now();
+      const hs = holdState.current;
+
+      // 1. Determine if gesture changed
+      if (rawGesture !== hs.candidateGesture) {
+        // Gesture changed — reset hold timer
+        hs.candidateGesture = rawGesture;
+        hs.candidateSince = now;
+        hs.triggerConsumed = false;
+        
+        if (rawGesture === 'unknown') {
+          hs.lastUnknownSince = now;
+        }
+      }
+
+      // 2. If unknown persists too long, reset to prevent stale holds
+      if (rawGesture === 'unknown' && now - hs.lastUnknownSince > GESTURE_UNKNOWN_RESET_MS) {
+        hs.triggerConsumed = false;
+        hs.candidateSince = now; // keep timing fresh
+      }
+
+      // 3. Check if hold threshold is met
+      const holdDuration = now - hs.candidateSince;
+      const inCooldown = (now - hs.lastTriggeredAt) < GESTURE_COOLDOWN_MS;
+      
+      const isOpen = rawGesture === 'open';
+      const isFist = rawGesture === 'fist';
+      const heldLongEnough = holdDuration >= GESTURE_HOLD_MS;
+      const notYetTriggered = !hs.triggerConsumed;
+      
+      const targetModeOpen = TreeMode.CHAOS;   // Memory Constellation
+      const targetModeFist = TreeMode.FORMED;  // Memory Core
+      const currentModeNow = currentModeRef.current;
+
+      // 4. Trigger open → CHAOS (release memory constellation)
+      if (isOpen && heldLongEnough && notYetTriggered && !inCooldown && currentModeNow !== targetModeOpen) {
+        hs.triggerConsumed = true;
+        hs.lastTriggeredAt = now;
+        hs.lastTriggeredGesture = 'open';
+        onModeChange(targetModeOpen);
+        setGestureStatus('Released: Memory Constellation');
+      }
+
+      // 5. Trigger fist → FORMED (gather memory core)
+      if (isFist && heldLongEnough && notYetTriggered && !inCooldown && currentModeNow !== targetModeFist) {
+        hs.triggerConsumed = true;
+        hs.lastTriggeredAt = now;
+        hs.lastTriggeredGesture = 'fist';
+        onModeChange(targetModeFist);
+        setGestureStatus('Gathered: Memory Core');
+      }
+
+      // 6. Update status text (only if not in triggered state)
+      if (hs.triggerConsumed) {
+        // Already triggered — show locked state
+        const modeName = currentModeNow === TreeMode.CHAOS ? 'Memory Constellation' : 'Memory Core';
+        if (inCooldown) {
+          setGestureStatus(`Locked: ${modeName} (cooldown)`);
+        } else {
+          setGestureStatus(`Locked: ${modeName}`);
+        }
+      } else if (inCooldown) {
+        const cdRemaining = Math.ceil((GESTURE_COOLDOWN_MS - (now - hs.lastTriggeredAt)) / 100) / 10;
+        setGestureStatus(`Cooldown ${cdRemaining}s...`);
+      } else if (isOpen && heldLongEnough) {
+        setGestureStatus('Hold steady... releasing');
+      } else if (isFist && heldLongEnough) {
+        setGestureStatus('Hold steady... gathering');
+      } else if (isOpen) {
+        setGestureStatus(`Open palm — hold ${(GESTURE_HOLD_MS / 1000).toFixed(1)}s to release`);
+      } else if (isFist) {
+        setGestureStatus(`Fist — hold ${(GESTURE_HOLD_MS / 1000).toFixed(1)}s to gather`);
+      } else {
+        setGestureStatus('Detected: ...');
       }
     };
 
@@ -279,11 +388,6 @@ export const GestureController: React.FC<GestureControllerProps> = ({ onModeChan
       if (handLandmarker) handLandmarker.close();
     };
   }, [onModeChange]);
-
-  // Sync ref with prop updates to prevent overriding in closure
-  useEffect(() => {
-    lastModeRef.current = currentMode;
-  }, [currentMode]);
 
   return (
     <div className="absolute top-6 right-[8%] z-50 flex flex-col items-end pointer-events-none">
@@ -327,6 +431,13 @@ export const GestureController: React.FC<GestureControllerProps> = ({ onModeChan
           />
         )}
     
+      </div>
+
+      {/* v0.2.1 Gesture status label */}
+      <div className="mt-2 w-[18.75vw] pointer-events-auto">
+        <p className="text-right text-[10px] md:text-xs text-[#D4AF37]/80 font-mono leading-tight px-1">
+          {gestureStatus}
+        </p>
       </div>
     </div>
   );
