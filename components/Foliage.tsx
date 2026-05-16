@@ -97,10 +97,10 @@ const vertexShader = `
     // Mix constellation color with core color based on progress
     vColor = mix(constColor, coreColor, easedProgress);
     
-    // Subtle sparkle/twinkle effect
+    // Subtle sparkle/twinkle effect (v0.2.4: reduced intensity)
     float sparkle = sin(uTime * 4.0 + aRandom * 100.0);
-    if (sparkle > 0.92) {
-      vColor += vec3(0.2, 0.15, 0.3);
+    if (sparkle > 0.94) {
+      vColor += vec3(0.12, 0.09, 0.18);
     }
 
     vAlpha = 1.0;

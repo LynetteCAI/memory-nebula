@@ -1,6 +1,6 @@
 
 import React, { useRef } from 'react';
-import { Environment, OrbitControls, ContactShadows } from '@react-three/drei';
+import { Environment, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette, Noise } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import { useFrame } from '@react-three/fiber';
@@ -104,16 +104,7 @@ export const Experience: React.FC<ExperienceProps> = ({ mode, handPosition, uplo
         <Foliage mode={mode} count={12000} />
         <Ornaments mode={mode} count={600} />
         <Polaroids mode={mode} uploadedPhotos={uploadedPhotos} twoHandsDetected={twoHandsDetected} onClosestPhotoChange={onClosestPhotoChange} />
-        <TreeStar mode={mode} />
-        
-        {/* Subtle floating shadow - reduced prominence */}
-        <ContactShadows 
-          opacity={0.3} 
-          scale={20} 
-          blur={3} 
-          far={5} 
-          color="#0a0a1a" 
-        />
+        {/* <TreeStar mode={mode} /> */}
       </group>
 
       <EffectComposer enableNormalPass={false}>

@@ -4,8 +4,8 @@ import { useFrame } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { TreeMode } from '../types';
-import { getNebulaPhotoPosition } from '../utils/nebulaLayout';
-import { getConstellationPhotoPosition } from '../utils/constellationLayout';
+import { getNebulaPhotoPosition, getNebulaPhotoScale } from '../utils/nebulaLayout';
+import { getConstellationPhotoPosition, getConstellationPhotoScale } from '../utils/constellationLayout';
 
 /**
  * ==================================================================================
@@ -39,6 +39,8 @@ interface PhotoData {
   chaosPos: THREE.Vector3;
   targetPos: THREE.Vector3;
   speed: number;
+  formedScale: number;
+  chaosScale: number;
 }
 
 const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }> = ({ data, mode, index }) => {
@@ -56,7 +58,7 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
         setTexture(loadedTex);
         setError(false);
       },
-      undefined, // onProgress
+      undefined,
       (err) => {
         console.warn(`Failed to load image: ${data.url}`, err);
         setError(true);
@@ -64,8 +66,14 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
     );
   }, [data.url]);
   
-  // Random sway offset
   const swayOffset = useMemo(() => Math.random() * 100, []);
+
+  // v0.2.5: dynamic scale — lerp between formed & chaos scale
+  const scaleRef = useRef(1);
+  useFrame(() => {
+    const target = mode === TreeMode.FORMED ? data.formedScale : data.chaosScale;
+    scaleRef.current = THREE.MathUtils.lerp(scaleRef.current, target, 0.08);
+  });
 
   useFrame((state, delta) => {
     if (!groupRef.current) return;
@@ -76,49 +84,33 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
     // 1. Position Interpolation
     const targetPos = isFormed ? data.targetPos : data.chaosPos;
     const step = delta * data.speed;
-    
-    // Smooth lerp to target position
     groupRef.current.position.lerp(targetPos, step);
 
-    // 2. Rotation & Sway Logic
+    // 2. Scale
+    const s = scaleRef.current;
+    groupRef.current.scale.setScalar(s);
+
+    // 3. Rotation & Sway Logic
     if (isFormed) {
-        // Face outward from nebula core center
         const dummy = new THREE.Object3D();
         dummy.position.copy(groupRef.current.position);
-        dummy.lookAt(0, 0, 0); // Look at nebula core center
-        dummy.rotateY(Math.PI); // Flip to face out
-        
-        // Base rotation alignment
+        dummy.lookAt(0, 0, 0);
+        dummy.rotateY(Math.PI);
         groupRef.current.quaternion.slerp(dummy.quaternion, step);
-        
-        // Gentle nebula float / sway
         const swayAngle = Math.sin(time * 1.5 + swayOffset) * 0.06;
         const tiltAngle = Math.cos(time * 1.2 + swayOffset) * 0.04;
-        
         groupRef.current.rotateZ(swayAngle * delta * 5);
-        
-        // Calculate the "perfect" rotation
         const currentRot = new THREE.Euler().setFromQuaternion(groupRef.current.quaternion);
         groupRef.current.rotation.z = currentRot.z + swayAngle * 0.04; 
         groupRef.current.rotation.x = currentRot.x + tiltAngle * 0.04;
-        
     } else {
-        // Constellation mode — photos face outward from nebula center
-        // so viewer can orbit and see them from any angle
         const dummy = new THREE.Object3D();
         dummy.position.copy(groupRef.current.position);
-        
-        // Look toward center, then flip 180° to face outward
         dummy.lookAt(0, 0, 0);
         dummy.rotateY(Math.PI);
-        
-        // Smoothly rotate to face outward
         groupRef.current.quaternion.slerp(dummy.quaternion, delta * 3);
-        
-        // Add gentle floating wobble
         const wobbleX = Math.sin(time * 1.5 + swayOffset) * 0.03;
         const wobbleZ = Math.cos(time * 1.2 + swayOffset) * 0.03;
-        
         const currentRot = new THREE.Euler().setFromQuaternion(groupRef.current.quaternion);
         groupRef.current.rotation.x = currentRot.x + wobbleX;
         groupRef.current.rotation.z = currentRot.z + wobbleZ;
@@ -126,9 +118,9 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
   });
 
   return (
-    <group ref={groupRef} scale={[0.65, 0.65, 0.65]}>
+    <group ref={groupRef}>
       
-      {/* Orbital tether - subtle glowing thread connecting photo to nebula core */}
+      {/* Orbital tether */}
       <mesh position={[0, 0.5, -0.1]}>
         <cylinderGeometry args={[0.003, 0.003, 0.8]} />
         <meshStandardMaterial color="#D4AF37" metalness={1} roughness={0.2} transparent opacity={0.4} />
@@ -136,14 +128,10 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
 
       {/* Frame Group */}
       <group position={[0, 0, 0]}>
-        
-        {/* White Paper Backing */}
         <mesh position={[0, 0, 0]}>
           <boxGeometry args={[1.2, 1.5, 0.02]} />
           <meshStandardMaterial color="#fdfdfd" roughness={0.8} />
         </mesh>
-
-        {/* The Photo Area */}
         <mesh position={[0, 0.15, 0.025]}>
           <planeGeometry args={[1.0, 1.0]} />
           {texture && !error ? (
@@ -152,14 +140,10 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
             <meshStandardMaterial color={error ? "#550000" : "#cccccc"} />
           )}
         </mesh>
-        
-        {/* Gold Memory Clip */}
         <mesh position={[0, 0.7, 0.025]} rotation={[0,0,0]}>
            <boxGeometry args={[0.1, 0.05, 0.05]} />
            <meshStandardMaterial color="#D4AF37" metalness={1} roughness={0.2} />
         </mesh>
-
-        {/* Text Label */}
         <Text
           position={[0, -0.55, 0.03]}
           fontSize={0.12}
@@ -188,20 +172,24 @@ export const Polaroids: React.FC<PolaroidsProps> = ({ mode, uploadedPhotos, twoH
     const count = uploadedPhotos.length;
 
     for (let i = 0; i < count; i++) {
-      // 1. Target Position: Memory Nebula outer orbit (replaces Christmas tree cone distribution)
-      // FORMED = Memory Core aggregated state - photos orbit the nebula core
+      // Target Position: Memory Nebula Core (FORMED) — v0.2.5 volume distribution
       const targetPos = getNebulaPhotoPosition(i, count);
 
-      // 2. CHAOS / Constellation Position: Memory Constellation arc chains (v0.2)
-      // Photos spread into 2-3 navigable arcs with proper spacing, not random scatter
+      // Chaos Position: Memory Constellation — v0.2.5 volume distribution
       const chaosPos = getConstellationPhotoPosition(i, count);
+
+      // Dynamic scales per mode
+      const formedScale = getNebulaPhotoScale(i, count);
+      const chaosScale = getConstellationPhotoScale(i, count);
 
       data.push({
         id: i,
         url: uploadedPhotos[i],
         chaosPos,
         targetPos,
-        speed: 0.8 + Math.random() * 1.5
+        speed: 0.8 + Math.random() * 1.5,
+        formedScale,
+        chaosScale,
       });
     }
     return data;

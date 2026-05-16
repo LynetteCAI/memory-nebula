@@ -152,38 +152,74 @@ export function getNebulaOrnamentPosition(
 // 3. NEBULA PHOTO POSITIONS (for Polaroids in aggregated state)
 // ---------------------------------------------------------------------------
 
+export type PhotoLayer = 'inner' | 'middle' | 'outer';
+
 /**
- * Generate a position for a polaroid photo orbiting the nebula core.
- * 
- * Photos are distributed in the outer shell (radius 3.2 - 5.4),
- * like memories being held in orbit around the core.
- * 
- * @param index - Photo index
- * @param total - Total photos
- * @returns THREE.Vector3 position in local space
+ * v0.2.5: Deterministic 3-layer volume distribution for photos in FORMED state.
+ *   Inner:  20% — r 1.8–2.8   embedded within the nebula volume
+ *   Middle: 45% — r 2.7–4.2   primary distribution layer
+ *   Outer:  35% — r 4.0–5.8   outer orbit, keeps some surrounding feel
+ */
+export function getNebulaPhotoLayer(index: number, total: number): PhotoLayer {
+  if (total <= 1) return 'middle';
+  const rnd = pseudoRandom(index, 47);
+  if (rnd < 0.20) return 'inner';
+  if (rnd < 0.65) return 'middle';
+  return 'outer';
+}
+
+/**
+ * Returns a scale factor for a photo based on layer and total count.
+ * More photos → smaller scale. Inner layer photos are slightly smaller.
+ */
+export function getNebulaPhotoScale(index: number, total: number): number {
+  const layer = getNebulaPhotoLayer(index, total);
+  let base: number;
+  if (total <= 12)       base = 0.65;
+  else if (total <= 24)  base = 0.56;
+  else if (total <= 40)  base = 0.48;
+  else                   base = 0.42;
+
+  if (layer === 'inner')  return base * 0.85;
+  if (layer === 'middle') return base;
+  return base * 1.06; // outer slightly larger
+}
+
+/**
+ * Generate a position for a polaroid photo in the Memory Nebula Core (FORMED).
+ * v0.2.5: 3-layer volume distribution replaces single outer shell.
  */
 export function getNebulaPhotoPosition(
   index: number,
   total: number
 ): THREE.Vector3 {
+  if (total === 0) return new THREE.Vector3(0, 0, 0);
+
   const t = total > 1 ? index / (total - 1) : 0;
-  
-  // Photos are in the outermost orbit
-  const r = 3.2 + pseudoRandom(index, 47) * 2.2; // 3.2 - 5.4
-  
-  // Use golden angle spiral for photos so they don't all cluster
+  const layer = getNebulaPhotoLayer(index, total);
+
+  let rMin: number, rMax: number;
+  if (layer === 'inner')      { rMin = 1.8; rMax = 2.8; }
+  else if (layer === 'middle') { rMin = 2.7; rMax = 4.2; }
+  else                         { rMin = 4.0; rMax = 5.8; }
+
+  const r = rMin + pseudoRandom(index, 49) * (rMax - rMin);
+
+  // Fibonacci sphere for even distribution
   const elevationAngle = Math.asin(2 * t - 1);
   const azimuthAngle = GOLDEN_ANGLE * index;
-  
-  // Add some height variation with deterministic noise
-  const heightJitter = Math.sin(index * 0.53 + 1.7) * 0.6;
-  
+
+  // Inner layer: more compressed y; outer: slightly wider
+  const yScale = layer === 'inner' ? 0.82 : layer === 'middle' ? 0.92 : 1.0;
+  const xzScale = layer === 'inner' ? 1.02 : 1.04;
+
   const cosElev = Math.cos(elevationAngle);
-  
-  const x = r * cosElev * Math.cos(azimuthAngle);
-  const y = r * Math.sin(elevationAngle) + heightJitter;
-  const z = r * cosElev * Math.sin(azimuthAngle);
-  
+  const heightJitter = Math.sin(index * 0.53 + 1.7) * (layer === 'inner' ? 0.35 : 0.55);
+
+  const x = r * cosElev * Math.cos(azimuthAngle) * xzScale;
+  const y = r * Math.sin(elevationAngle) * yScale + heightJitter;
+  const z = r * cosElev * Math.sin(azimuthAngle) * xzScale;
+
   return new THREE.Vector3(x, y, z);
 }
 

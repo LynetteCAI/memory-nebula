@@ -179,21 +179,42 @@ export function getConstellationOrnamentPosition(
 // 3. CONSTELLATION PHOTO POSITIONS (for Polaroids in released state)
 // ---------------------------------------------------------------------------
 
+export type ConstellationPhotoLayer = 'inner' | 'middle' | 'outer';
+
+/**
+ * v0.2.5: 3-layer volume distribution for CHAOS/Constellation state.
+ *   Inner:  20% — r 3.5–5.8   near the core residue
+ *   Middle: 50% — r 5.5–8.8   primary explorable zone
+ *   Outer:  30% — r 8.0–11.5  depth layers + arc chains
+ */
+export function getConstellationPhotoLayer(index: number, total: number): ConstellationPhotoLayer {
+  if (total <= 1) return 'middle';
+  const rnd = pRandom(index, 301);
+  if (rnd < 0.20) return 'inner';
+  if (rnd < 0.70) return 'middle';
+  return 'outer';
+}
+
+/**
+ * Returns a scale factor for a photo in constellation state.
+ * Slightly larger than FORMED for readability.
+ */
+export function getConstellationPhotoScale(index: number, total: number): number {
+  const layer = getConstellationPhotoLayer(index, total);
+  let base: number;
+  if (total <= 12)       base = 0.72;
+  else if (total <= 24)  base = 0.62;
+  else if (total <= 40)  base = 0.54;
+  else                   base = 0.48;
+
+  if (layer === 'inner')  return base * 0.88;
+  if (layer === 'middle') return base;
+  return base * 1.05;
+}
+
 /**
  * Generate the spread position for a polaroid photo in the Memory Constellation.
- * 
- * Photos are arranged in 2–3 constellation arc chains orbiting the center.
- * They face roughly outward / toward the viewer, are well-spaced, and form
- * a navigable memory gallery within the nebula.
- * 
- * Key design:
- *   - 2 or 3 arcs (depending on photo count)
- *   - Each arc has its own radius band and height offset
- *   - Photos face roughly outward (toward center) so viewer sees fronts
- *   - Sufficient spacing — no clustering
- * 
- * @param index - Photo index (0..total-1)
- * @param total - Total photo count
+ * v0.2.5: 3-layer volume distribution with arc accent in the outer layer.
  */
 export function getConstellationPhotoPosition(
   index: number,
@@ -201,44 +222,55 @@ export function getConstellationPhotoPosition(
 ): THREE.Vector3 {
   if (total === 0) return new THREE.Vector3(0, 0, 0);
 
-  // Choose number of arcs based on total
-  const numArcs = total <= 6 ? 2 : 3;
-  const arcIndex = index % numArcs;
+  const layer = getConstellationPhotoLayer(index, total);
 
-  // Each arc has different radius band and height
-  const arcRadiusMin = [5.5, 7.0, 8.5];
-  const arcRadiusMax = [7.5, 9.5, 11.0];
-  const arcHeightBase = [-1.5, 1.0, 3.0];
-  
-  const rMin = arcRadiusMin[arcIndex % 3];
-  const rMax = arcRadiusMax[arcIndex % 3];
-  const heightBase = arcHeightBase[arcIndex % 3];
+  let rMin: number, rMax: number;
+  if (layer === 'inner')      { rMin = 3.5; rMax = 5.8; }
+  else if (layer === 'middle') { rMin = 5.5; rMax = 8.8; }
+  else                          { rMin = 8.0; rMax = 11.5; }
 
-  const r = rMin + pRandom(index, 301) * (rMax - rMin);
+  const r = rMin + pRandom(index, 305) * (rMax - rMin);
 
-  // Angle: distribute photos within their arc evenly, then offset per arc
-  const photosPerArc = Math.ceil(total / numArcs);
-  const indexInArc = Math.floor(index / numArcs);
-  const angleOffset = arcIndex * (2 * Math.PI / numArcs);
-  
-  // Use golden angle for even spacing within arc
-  const baseAngle = GOLDEN_ANGLE * indexInArc * 1.4 + angleOffset;
-  
-  // Subtle jitter to avoid perfect alignment
-  const angleJitter = pRandom(index, 307) * 0.25 - 0.125;
-  const azimuthAngle = baseAngle + angleJitter;
+  // Outer layer retains gentle arc structure; inner/middle use volume
+  const t = total > 1 ? index / (total - 1) : 0;
 
-  // Height: arc base + small jitter
-  const heightJitter = Math.sin(index * 0.63 + 2.7) * 0.8;
-  const y = heightBase + heightJitter;
+  let azimuthAngle: number;
+  let elevationAngle: number;
 
-  // Slightly elliptical in XZ plane
-  const x = r * Math.cos(azimuthAngle) * 1.15;
-  const z = r * Math.sin(azimuthAngle) * 1.05;
+  if (layer === 'outer') {
+    // Arc-like structure for outer layer
+    const numArcs = total <= 6 ? 2 : 3;
+    const arcIndex = index % numArcs;
+    const indexInArc = Math.floor(index / numArcs);
+    const angleOffset = arcIndex * (2 * Math.PI / numArcs);
+    const baseAngle = GOLDEN_ANGLE * indexInArc * 1.4 + angleOffset;
+    const angleJitter = pRandom(index, 309) * 0.25 - 0.125;
+    azimuthAngle = baseAngle + angleJitter;
 
-  // Keep photos mostly in front half for better viewing
-  // (negative z bias so they don't all hide behind the nebula)
-  const zBias = -1.5 + pRandom(index, 311) * 3.0;
-  
-  return new THREE.Vector3(x, y, z + zBias);
+    const arcHeightBase = [-1.5, 1.0, 3.0];
+    const heightBase = arcHeightBase[arcIndex % 3];
+    const hJitter = Math.sin(index * 0.63 + 2.7) * 0.8;
+    const y = heightBase + hJitter;
+
+    const x = r * Math.cos(azimuthAngle) * 1.15;
+    const z = r * Math.sin(azimuthAngle) * 1.05;
+    const zBias = -1.5 + pRandom(index, 313) * 3.0;
+    return new THREE.Vector3(x, y, z + zBias);
+  }
+
+  // Inner & middle: Fibonacci volume distribution
+  const rawElevation = Math.asin(2 * t - 1);
+  const flatten = layer === 'inner' ? 0.75 : 0.65;
+  elevationAngle = rawElevation * flatten;
+  azimuthAngle = GOLDEN_ANGLE * index * 0.7;
+
+  const cosElev = Math.cos(elevationAngle);
+  const yScale = layer === 'inner' ? 0.82 : 0.78;
+  const heightJitter = Math.sin(index * 0.57 + 1.9) * (layer === 'inner' ? 0.6 : 0.9);
+
+  const x = r * cosElev * Math.cos(azimuthAngle) * 1.12;
+  const z = r * cosElev * Math.sin(azimuthAngle) * 1.06;
+  const y = r * Math.sin(elevationAngle) * yScale + heightJitter;
+
+  return new THREE.Vector3(x, y, z);
 }

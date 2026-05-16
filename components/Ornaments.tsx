@@ -2,247 +2,366 @@ import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TreeMode } from '../types';
-import { getNebulaOrnamentPosition } from '../utils/nebulaLayout';
-import { getConstellationOrnamentPosition } from '../utils/constellationLayout';
 
-interface OrnamentsProps {
-  mode: TreeMode;
-  count: number;
+// ===========================================================================
+// v0.2.3 Stellar Systems — each stellar anchor has its own bound planets
+// ===========================================================================
+
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
+/** Deterministic pseudo-random [0, 1] */
+function pRand(idx: number, seed: number): number {
+  const x = Math.sin(idx * 127.1 + seed * 311.7) * 43758.5453;
+  return x - Math.floor(x);
 }
 
-// Memory Nebula ornament types
-type OrnamentType = 'planet' | 'crystal' | 'stardust';
+// ---------------------------------------------------------------------------
+// Counts
+// ---------------------------------------------------------------------------
+const STELLAR_COUNT = 10;
+const PLANET_MAJOR_COUNT = 25;
+const PLANET_MINOR_COUNT = 95;
 
-interface InstanceData {
-  chaosPos: THREE.Vector3;
-  targetPos: THREE.Vector3;
-  type: OrnamentType;
+// ---------------------------------------------------------------------------
+// Colors
+// ---------------------------------------------------------------------------
+const warmWhite   = new THREE.Color('#FFF4D6');
+const champagne   = new THREE.Color('#F2D38A');
+const paleBlueW   = new THREE.Color('#CFE8FF');
+const deepBlue    = new THREE.Color('#7FA9D9');
+const cyanGray    = new THREE.Color('#95BFD1');
+const icyBlue     = new THREE.Color('#B9D7E8');
+const fogIvory    = new THREE.Color('#EAE7DE');
+const mutedViolet = new THREE.Color('#8C88A8');
+const dustyMars   = new THREE.Color('#A66D5A');
+const sandyBeige  = new THREE.Color('#C8B08A');
+
+const STELLAR_PALETTE = [warmWhite, champagne, paleBlueW, champagne, warmWhite, paleBlueW, champagne, warmWhite, paleBlueW, champagne];
+const PLANET_PALETTE  = [deepBlue, cyanGray, icyBlue, fogIvory, mutedViolet];
+const PLANET_ACCENT   = [dustyMars, sandyBeige]; // ≤15%
+
+// ===========================================================================
+// Stellar system centers — balanced Fibonacci sphere, no flattening bias
+// ===========================================================================
+
+interface StellarSystem {
+  id: number;
+  formedCenter: THREE.Vector3;
+  chaosCenter: THREE.Vector3;
   color: THREE.Color;
   scale: number;
   speed: number;
-  rotationOffset: THREE.Euler;
+}
+
+function makeStellarSystems(): StellarSystem[] {
+  const systems: StellarSystem[] = [];
+  for (let i = 0; i < STELLAR_COUNT; i++) {
+    // Fibonacci sphere for uniform spherical distribution
+    const idx = i + 0.5;
+    const phi = Math.asin(1 - 2 * idx / STELLAR_COUNT); // uniform lat
+    const theta = GOLDEN_ANGLE * i;
+    const dirX = Math.cos(phi) * Math.cos(theta);
+    const dirY = Math.sin(phi);
+    const dirZ = Math.cos(phi) * Math.sin(theta);
+
+    // FORMED center — tight around core
+    const fR = 1.6 + pRand(i, 801) * 1.5; // 1.6–3.1
+    const formedCenter = new THREE.Vector3(
+      dirX * fR * 1.03,
+      dirY * fR * 0.92,
+      dirZ * fR * 1.03,
+    );
+
+    // CHAOS center — spread across constellation space
+    const cR = 5.0 + pRand(i, 811) * 3.8; // 5.0–8.8
+    const chaosCenter = new THREE.Vector3(
+      dirX * cR * 1.08,
+      dirY * cR * 0.95,
+      dirZ * cR * 1.05,
+    );
+
+    const scale = 0.26 + pRand(i, 821) * 0.16; // 0.26–0.42
+    const color = STELLAR_PALETTE[i % STELLAR_PALETTE.length];
+
+    systems.push({
+      id: i,
+      formedCenter,
+      chaosCenter,
+      color,
+      scale,
+      speed: 0.35 + pRand(i, 823) * 0.45,
+    });
+  }
+  return systems;
+}
+
+// ===========================================================================
+// Planet body — bound to a stellar system
+// ===========================================================================
+
+type PlanetKind = 'major' | 'minor';
+
+interface PlanetBody {
+  systemId: number;
+  kind: PlanetKind;
+  /** Local orbit offset in FORMED state */
+  formedOffset: THREE.Vector3;
+  /** Local orbit offset in CHAOS state */
+  chaosOffset: THREE.Vector3;
+  scale: number;
+  color: THREE.Color;
+  speed: number;
+  /** Orbit angle rate for gentle drift */
+  orbitSpeed: number;
 }
 
 /**
- * Nebula ornament colors — pale, translucent, cosmic.
- * No Christmas red/green.
+ * Build a deterministic orbit offset around a stellar anchor.
+ * Each planet-system pair gets a unique orbital plane (tilted).
  */
-const NEBULA_ORNAMENT_COLORS = {
-  paleBlue:    new THREE.Color('#A8C8E8'),
-  cyanMist:    new THREE.Color('#88CCEE'),
-  violet:      new THREE.Color('#6B5B95'),
-  champagne:   new THREE.Color('#D4AF37'),
-  ivory:       new THREE.Color('#F5E6BF'),
-  roseGold:    new THREE.Color('#B76E79'),
-  softAmber:   new THREE.Color('#E8A860'),
-};
+function makeOrbitOffset(
+  planetIdx: number,
+  systemId: number,
+  kind: PlanetKind,
+  mode: 'formed' | 'chaos',
+): THREE.Vector3 {
+  // Deterministic orbit parameters per (planetIdx, systemId)
+  const orbitAngle = GOLDEN_ANGLE * planetIdx * 0.7 + systemId * 1.3;
+  const tiltAxisX = Math.sin(systemId * 2.1 + planetIdx * 0.3);
+  const tiltAxisZ = Math.cos(systemId * 1.7 + planetIdx * 0.5);
+  const tiltAngle = 0.3 + pRand(planetIdx + systemId * 100, 901) * 0.5;
 
-export const Ornaments: React.FC<OrnamentsProps> = ({ mode, count }) => {
-  // 3 InstancedMeshes for different geometries: mini planets, crystal shards, stardust lights
-  const planetsRef = useRef<THREE.InstancedMesh>(null);
-  const crystalsRef = useRef<THREE.InstancedMesh>(null);
-  const stardustRef = useRef<THREE.InstancedMesh>(null);
-  
+  // Orbit radius
+  let rMin: number, rMax: number;
+  if (mode === 'formed') {
+    rMin = kind === 'major' ? 0.42 : 0.18;
+    rMax = kind === 'major' ? 0.85 : 0.55;
+  } else {
+    rMin = kind === 'major' ? 0.65 : 0.28;
+    rMax = kind === 'major' ? 1.35 : 0.85;
+  }
+  const orbitR = rMin + pRand(planetIdx + systemId * 100, 903) * (rMax - rMin);
+
+  // Base position in orbital plane (XZ)
+  const localX = Math.cos(orbitAngle) * orbitR;
+  const localZ = Math.sin(orbitAngle) * orbitR * (0.65 + pRand(planetIdx, 905) * 0.30);
+  const localY = Math.sin(orbitAngle * 1.3 + systemId) * orbitR * 0.25;
+
+  // Apply tilt rotation
+  const tiltNorm = Math.sqrt(tiltAxisX * tiltAxisX + tiltAxisZ * tiltAxisZ) || 1;
+  const nx = tiltAxisX / tiltNorm;
+  const nz = tiltAxisZ / tiltNorm;
+
+  // Rodrigues rotation around axis (nx, 0, nz) by tiltAngle
+  const cosT = Math.cos(tiltAngle);
+  const sinT = Math.sin(tiltAngle);
+  const dotN = localX * nx + localZ * nz;
+  const rx = localX * cosT + (localZ * nx - localY * nz) * sinT + dotN * nx * (1 - cosT);
+  const rz = localZ * cosT + (localY * nx - localX * nz) * sinT + dotN * nz * (1 - cosT);
+  // Simplified y tilt
+  const ry = localY + (localX * nx + localZ * nz) * 0.15;
+
+  return new THREE.Vector3(rx, ry, rz);
+}
+
+function makePlanetBodies(systems: StellarSystem[]): { majors: PlanetBody[]; minors: PlanetBody[] } {
+  const majors: PlanetBody[] = [];
+  const minors: PlanetBody[] = [];
+  let pIdx = 0;
+
+  // Major planets
+  for (let i = 0; i < PLANET_MAJOR_COUNT; i++, pIdx++) {
+    const systemId = i % STELLAR_COUNT;
+    const colorIdx = Math.floor(pRand(pIdx, 911) * PLANET_PALETTE.length);
+    const useAccent = pRand(pIdx, 913) < 0.12;
+    const color = useAccent
+      ? PLANET_ACCENT[Math.floor(pRand(pIdx, 915) * PLANET_ACCENT.length)].clone()
+      : PLANET_PALETTE[colorIdx].clone();
+    majors.push({
+      systemId,
+      kind: 'major',
+      formedOffset: makeOrbitOffset(pIdx, systemId, 'major', 'formed'),
+      chaosOffset:  makeOrbitOffset(pIdx, systemId, 'major', 'chaos'),
+      scale: 0.10 + pRand(pIdx, 917) * 0.06,
+      color,
+      speed: 0.5 + pRand(pIdx, 919) * 1.0,
+      orbitSpeed: 0.03 + pRand(pIdx, 921) * 0.04,
+    });
+  }
+
+  // Minor planets
+  for (let i = 0; i < PLANET_MINOR_COUNT; i++, pIdx++) {
+    const systemId = Math.floor(pRand(pIdx, 931) * STELLAR_COUNT);
+    const colorIdx = Math.floor(pRand(pIdx, 933) * PLANET_PALETTE.length);
+    const useAccent = pRand(pIdx, 935) < 0.15;
+    const color = useAccent
+      ? PLANET_ACCENT[Math.floor(pRand(pIdx, 937) * PLANET_ACCENT.length)].clone()
+      : PLANET_PALETTE[colorIdx].clone();
+    minors.push({
+      systemId,
+      kind: 'minor',
+      formedOffset: makeOrbitOffset(pIdx, systemId, 'minor', 'formed'),
+      chaosOffset:  makeOrbitOffset(pIdx, systemId, 'minor', 'chaos'),
+      scale: 0.05 + pRand(pIdx, 939) * 0.05,
+      color,
+      speed: 0.6 + pRand(pIdx, 941) * 1.1,
+      orbitSpeed: 0.04 + pRand(pIdx, 943) * 0.06,
+    });
+  }
+
+  return { majors, minors };
+}
+
+// ===========================================================================
+// Component
+// ===========================================================================
+
+interface OrnamentsProps {
+  mode: TreeMode;
+  count: number; // kept for API compat, internally ignored
+}
+
+export const Ornaments: React.FC<OrnamentsProps> = ({ mode }) => {
+  const stellarRef = useRef<THREE.InstancedMesh>(null);
+  const majorRef = useRef<THREE.InstancedMesh>(null);
+  const minorRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  // Generate data once
-  const { planetsData, crystalsData, stardustData } = useMemo(() => {
-    const _planets: InstanceData[] = [];
-    const _crystals: InstanceData[] = [];
-    const _stardust: InstanceData[] = [];
-    
-    const { paleBlue, cyanMist, violet, champagne, ivory, roseGold, softAmber } = NEBULA_ORNAMENT_COLORS;
-    const palette = [champagne, ivory, champagne, roseGold, paleBlue, violet, softAmber, ivory, cyanMist, paleBlue];
+  // ---- generate all data once (systems + planets) ----
+  const { systems, majors, minors } = useMemo(() => {
+    const _systems = makeStellarSystems();
+    const { majors: _majors, minors: _minors } = makePlanetBodies(_systems);
+    return { systems: _systems, majors: _majors, minors: _minors };
+  }, []);
 
-    for (let i = 0; i < count; i++) {
-      const rnd = Math.random();
-      let type: OrnamentType = 'planet';
-      if (rnd > 0.75) type = 'crystal';
-      if (rnd > 0.90) type = 'stardust';
-
-      // Target Position: Memory Nebula Core sphere
-      const targetPos = getNebulaOrnamentPosition(i, count);
-
-      // Chaos Position: Memory Constellation (v0.2) — structured arc/ring distribution
-      // Replaces random sphere explosion
-      const { position: constPos } = getConstellationOrnamentPosition(i, count);
-      const chaosPos = constPos;
-
-      // Scales: stardust tiny, crystals medium, planets slightly larger
-      const scale = type === 'stardust' 
-        ? 0.06 + Math.random() * 0.08 
-        : type === 'crystal' 
-          ? 0.12 + Math.random() * 0.16 
-          : 0.14 + Math.random() * 0.18;
-      
-      // Colors: stardust gets softer warm/cool tones, others from palette
-      const color = type === 'stardust' 
-        ? [ivory, cyanMist, new THREE.Color('#FFEEDD'), champagne][Math.floor(Math.random() * 4)]
-        : palette[Math.floor(Math.random() * palette.length)];
-
-      const data: InstanceData = {
-        chaosPos,
-        targetPos,
-        type,
-        color,
-        scale,
-        speed: 0.5 + Math.random() * 1.5,
-        rotationOffset: new THREE.Euler(Math.random() * Math.PI, Math.random() * Math.PI, 0)
-      };
-
-      if (type === 'planet') _planets.push(data);
-      else if (type === 'crystal') _crystals.push(data);
-      else _stardust.push(data);
-    }
-
-    return { planetsData: _planets, crystalsData: _crystals, stardustData: _stardust };
-  }, [count]);
-
+  // ---- set initial instance colors ----
   useLayoutEffect(() => {
-    // Set initial colors on each InstancedMesh
-    [
-      { ref: planetsRef, data: planetsData },
-      { ref: crystalsRef, data: crystalsData },
-      { ref: stardustRef, data: stardustData }
-    ].forEach(({ ref, data }) => {
-      if (ref.current) {
-        data.forEach((d, i) => {
-          ref.current!.setColorAt(i, d.color);
-        });
-        ref.current.instanceColor!.needsUpdate = true;
-      }
-    });
-  }, [planetsData, crystalsData, stardustData]);
+    if (stellarRef.current) {
+      systems.forEach((s, i) => stellarRef.current!.setColorAt(i, s.color));
+      stellarRef.current.instanceColor!.needsUpdate = true;
+    }
+    if (majorRef.current) {
+      majors.forEach((p, i) => majorRef.current!.setColorAt(i, p.color));
+      majorRef.current.instanceColor!.needsUpdate = true;
+    }
+    if (minorRef.current) {
+      minors.forEach((p, i) => minorRef.current!.setColorAt(i, p.color));
+      minorRef.current.instanceColor!.needsUpdate = true;
+    }
+  }, [systems, majors, minors]);
 
+  // ---- per-frame animation ----
   useFrame((state, delta) => {
     const isFormed = mode === TreeMode.FORMED;
     const time = state.clock.elapsedTime;
 
-    // Helper to update a mesh ref
-    const updateMesh = (ref: React.RefObject<THREE.InstancedMesh>, data: InstanceData[]) => {
-      if (!ref.current) return;
-
+    // --- Stellar bodies ---
+    if (stellarRef.current) {
       let needsUpdate = false;
+      systems.forEach((s, i) => {
+        const dest = isFormed ? s.formedCenter : s.chaosCenter;
+        stellarRef.current!.getMatrixAt(i, dummy.matrix);
+        dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
+        dummy.position.lerp(dest, delta * s.speed);
 
-      data.forEach((d, i) => {
-        // Interpolation Factor based on individual speed and global delta
-        // We use a simple approach: if formed, target is targetPos, else chaosPos
-        const dest = isFormed ? d.targetPos : d.chaosPos;
-        
-        // We actually want to lerp the CURRENT position to the DESTINATION
-        // But extracting current position from matrix is expensive every frame for all.
-        // Instead, we calculate "current" based on a virtual progress 0-1 driven by state.
-        
-        // To simulate "physics" (heavy/light), we don't store state per particle here (too complex for this snippet).
-        // Instead, we calculate position based on a time-dependent lerp factor.
-        
-        // However, a simple way to make it feel organic is:
-        // Position = Mix(Chaos, Target, SmoothStep(GlobalProgress * speed))
-        
-        // Let's use a sin wave derived from time for hover, but the main transition is driven by a hidden 'progress' value
-        // Since we don't have a global store for animation progress per particle, we approximate using the mode switch time.
-        // For a robust system, we'd use a spring library, but here we do manual lerping.
+        const dist = dummy.position.distanceTo(dest);
+        if (dist < 0.6) {
+          dummy.position.x += Math.sin(time * 1.1 + s.chaosCenter.y * 1.5) * 0.004;
+          dummy.position.y += Math.cos(time * 0.9 + s.chaosCenter.x * 1.3) * 0.003;
+          dummy.position.z += Math.cos(time * 1.0 + s.chaosCenter.z * 1.4) * 0.004;
+        }
 
-        // Get current matrix position to lerp from? Too expensive.
-        // Let's assume a global transition variable `t` that goes 0->1 or 1->0.
-        // We will misuse the object's userdata or just calculate purely functional.
-        
-        // Functional approach:
-        // We need an accumulated value. Let's create a visual wobble.
-        
-        // NOTE: For true interactive physics, we'd use useSprings from react-spring/three, 
-        // but for 1000 instances, manual matrix manipulation is better.
-        // Here we will simply interpolate between the two static positions based on a "progress" variable
-        // that we track manually or approximate.
-        
-        // Let's read a custom progress from the dataset. 
-        // We'll augment the data object with a mutable `currentProgress` property in a closure if possible,
-        // but `data` is static.
-        
-        // Let's just use the `MathUtils.lerp` on the vectors directly inside the loop 
-        // by reading the matrix, lerping, writing back.
+        dummy.rotation.y += delta * 0.04;
+        let scl = s.scale * (1 + Math.sin(time * 2.5 + i * 1.7) * 0.06);
+        dummy.scale.setScalar(scl);
+        dummy.lookAt(0, 0, 0);
+        dummy.updateMatrix();
+        stellarRef.current!.setMatrixAt(i, dummy.matrix);
+        needsUpdate = true;
+      });
+      if (needsUpdate) stellarRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // --- Planets (orbit their stellar system) - shared helper ---
+    const updatePlanetMesh = (ref: React.RefObject<THREE.InstancedMesh>, data: PlanetBody[]) => {
+      if (!ref.current) return;
+      let needsUpdate = false;
+      data.forEach((p, i) => {
+        stellarRef.current!.getMatrixAt(p.systemId, dummy.matrix);
+        dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
+        const stellarPos = dummy.position.clone();
+
+        const offset = isFormed ? p.formedOffset : p.chaosOffset;
+        const driftAngle = time * p.orbitSpeed;
+        const cosA = Math.cos(driftAngle);
+        const sinA = Math.sin(driftAngle);
+        const rotX = offset.x * cosA - offset.z * sinA;
+        const rotZ = offset.x * sinA + offset.z * cosA;
+
+        const worldTarget = new THREE.Vector3(
+          stellarPos.x + rotX,
+          stellarPos.y + offset.y,
+          stellarPos.z + rotZ,
+        );
+
         ref.current!.getMatrixAt(i, dummy.matrix);
         dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
-        
-        const step = delta * d.speed;
-        dummy.position.lerp(dest, step);
-
-        // Add nebula drift when formed
-        if (isFormed && dummy.position.distanceTo(d.targetPos) < 0.5) {
-          dummy.position.x += Math.sin(time * 1.2 + d.chaosPos.x * 2) * 0.003;
-          dummy.position.y += Math.cos(time * 1.0 + d.chaosPos.y * 2) * 0.002;
-          dummy.position.z += Math.cos(time * 1.3 + d.chaosPos.z * 2) * 0.003;
-        }
-
-        // Rotation per type
-        if (d.type === 'crystal') {
-          // Crystal shards: gentle continuous spin
-          dummy.rotation.x += delta * 0.35;
-          dummy.rotation.y += delta * 0.25;
-          dummy.rotation.z += delta * 0.15;
-        } else if (d.type === 'planet') {
-          // Mini planets: very slow rotation, face outward
-          dummy.rotation.y += delta * 0.08;
-          dummy.lookAt(0, 0, 0);
-        } else {
-          // Stardust: face outward with subtle wobble
-          dummy.lookAt(0, 0, 0);
-        }
-
-        dummy.scale.setScalar(d.scale);
-        if (d.type === 'stardust') {
-          // Subtle twinkle
-          const twinkle = 1 + Math.sin(time * 4 + d.chaosPos.y * 3) * 0.2;
-          dummy.scale.multiplyScalar(twinkle);
-        }
-
+        dummy.position.lerp(worldTarget, delta * p.speed);
+        dummy.rotation.y += delta * 0.06;
+        dummy.scale.setScalar(p.scale);
+        dummy.lookAt(stellarPos.x, stellarPos.y, stellarPos.z);
         dummy.updateMatrix();
         ref.current!.setMatrixAt(i, dummy.matrix);
         needsUpdate = true;
       });
-
       if (needsUpdate) ref.current.instanceMatrix.needsUpdate = true;
     };
 
-    updateMesh(planetsRef, planetsData);
-    updateMesh(crystalsRef, crystalsData);
-    updateMesh(stardustRef, stardustData);
+    updatePlanetMesh(majorRef, majors);
+    updatePlanetMesh(minorRef, minors);
   });
 
   return (
     <>
-      {/* Mini Planets: translucent low-saturation spheres orbiting the nebula core */}
-      <instancedMesh ref={planetsRef} args={[undefined, undefined, planetsData.length]}>
+      {/* Stellar Bodies — luminous system anchors, toneMapped=false for true glow */}
+      <instancedMesh ref={stellarRef} args={[undefined, undefined, systems.length]}>
         <sphereGeometry args={[1, 32, 32]} />
-        <meshStandardMaterial 
-          roughness={0.2} 
-          metalness={0.3} 
-          transparent
-          opacity={0.55}
-          envMapIntensity={0.8}
-        />
-      </instancedMesh>
-
-      {/* Crystal Shards: memory crystals — octahedron fragments with glassy feel */}
-      <instancedMesh ref={crystalsRef} args={[undefined, undefined, crystalsData.length]}>
-        <octahedronGeometry args={[0.9, 0]} />
-        <meshStandardMaterial 
-          roughness={0.15} 
-          metalness={0.1} 
-          transparent
-          opacity={0.5}
-        />
-      </instancedMesh>
-
-      {/* Stardust Lights: tiny emissive memory light dust */}
-      <instancedMesh ref={stardustRef} args={[undefined, undefined, stardustData.length]}>
-        <sphereGeometry args={[1, 6, 6]} />
-        <meshStandardMaterial 
+        <meshStandardMaterial
+          roughness={0.12}
+          metalness={0.03}
           emissive="white"
-          emissiveIntensity={1.5}
-          toneMapped={false}
+          emissiveIntensity={0.8}
           transparent
-          opacity={0.7}
+          opacity={0.90}
+          toneMapped={false}
+        />
+      </instancedMesh>
+
+      {/* Major Planets — brighter, slight reflected-light emissive */}
+      <instancedMesh ref={majorRef} args={[undefined, undefined, majors.length]}>
+        <sphereGeometry args={[1, 24, 24]} />
+        <meshStandardMaterial
+          roughness={0.40}
+          metalness={0.05}
+          emissive="white"
+          emissiveIntensity={0.15}
+          transparent
+          opacity={0.88}
+          envMapIntensity={1.0}
+        />
+      </instancedMesh>
+
+      {/* Minor Planets — dimmer, faint emissive, more transparent */}
+      <instancedMesh ref={minorRef} args={[undefined, undefined, minors.length]}>
+        <sphereGeometry args={[1, 20, 20]} />
+        <meshStandardMaterial
+          roughness={0.50}
+          metalness={0.04}
+          emissive="white"
+          emissiveIntensity={0.08}
+          transparent
+          opacity={0.68}
+          envMapIntensity={0.7}
         />
       </instancedMesh>
     </>
