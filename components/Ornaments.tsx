@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TreeMode } from '../types';
 import { getNebulaOrnamentPosition } from '../utils/nebulaLayout';
+import { getConstellationOrnamentPosition } from '../utils/constellationLayout';
 
 interface OrnamentsProps {
   mode: TreeMode;
@@ -62,15 +63,10 @@ export const Ornaments: React.FC<OrnamentsProps> = ({ mode, count }) => {
       // Target Position: Memory Nebula Core sphere
       const targetPos = getNebulaOrnamentPosition(i, count);
 
-      // Chaos Position
-      const cR = 15 + Math.random() * 15;
-      const cTheta = Math.random() * Math.PI * 2;
-      const cPhi = Math.acos(2 * Math.random() - 1);
-      const chaosPos = new THREE.Vector3(
-        cR * Math.sin(cPhi) * Math.cos(cTheta),
-        cR * Math.sin(cPhi) * Math.sin(cTheta) + 5,
-        cR * Math.cos(cPhi)
-      );
+      // Chaos Position: Memory Constellation (v0.2) — structured arc/ring distribution
+      // Replaces random sphere explosion
+      const { position: constPos } = getConstellationOrnamentPosition(i, count);
+      const chaosPos = constPos;
 
       // Scales: stardust tiny, crystals medium, planets slightly larger
       const scale = type === 'stardust' 

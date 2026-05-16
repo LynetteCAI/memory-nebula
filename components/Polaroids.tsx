@@ -5,6 +5,7 @@ import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { TreeMode } from '../types';
 import { getNebulaPhotoPosition } from '../utils/nebulaLayout';
+import { getConstellationPhotoPosition } from '../utils/constellationLayout';
 
 /**
  * ==================================================================================
@@ -102,16 +103,16 @@ const PolaroidItem: React.FC<{ data: PhotoData; mode: TreeMode; index: number }>
         groupRef.current.rotation.x = currentRot.x + tiltAngle * 0.04;
         
     } else {
-        // Chaos mode - face toward camera with gentle floating
-        // Camera position relative to scene group: [0, 9, 20]
-        const cameraPos = new THREE.Vector3(0, 9, 20);
+        // Constellation mode — photos face outward from nebula center
+        // so viewer can orbit and see them from any angle
         const dummy = new THREE.Object3D();
         dummy.position.copy(groupRef.current.position);
         
-        // Make photos face the camera
-        dummy.lookAt(cameraPos);
+        // Look toward center, then flip 180° to face outward
+        dummy.lookAt(0, 0, 0);
+        dummy.rotateY(Math.PI);
         
-        // Smoothly rotate to face camera
+        // Smoothly rotate to face outward
         groupRef.current.quaternion.slerp(dummy.quaternion, delta * 3);
         
         // Add gentle floating wobble
@@ -191,19 +192,9 @@ export const Polaroids: React.FC<PolaroidsProps> = ({ mode, uploadedPhotos, twoH
       // FORMED = Memory Core aggregated state - photos orbit the nebula core
       const targetPos = getNebulaPhotoPosition(i, count);
 
-      // 2. Chaos Position - Spread out and closer to camera
-      const relativeY = 5;
-      const relativeZ = 20;
-      
-      const angle = (i / count) * Math.PI * 2;
-      const distance = 3 + Math.random() * 4;
-      const heightSpread = (Math.random() - 0.5) * 8;
-      
-      const chaosPos = new THREE.Vector3(
-        distance * Math.cos(angle) * 1.2,
-        relativeY + heightSpread,
-        relativeZ - 4 + distance * Math.sin(angle) * 0.5
-      );
+      // 2. CHAOS / Constellation Position: Memory Constellation arc chains (v0.2)
+      // Photos spread into 2-3 navigable arcs with proper spacing, not random scatter
+      const chaosPos = getConstellationPhotoPosition(i, count);
 
       data.push({
         id: i,

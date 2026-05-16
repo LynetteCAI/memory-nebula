@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TreeMode } from '../types';
 import { getNebulaCorePosition } from '../utils/nebulaLayout';
+import { getConstellationDustPosition } from '../utils/constellationLayout';
 
 interface FoliageProps {
   mode: TreeMode;
@@ -35,11 +36,17 @@ const vertexShader = `
     // Interpolate position
     vec3 newPos = mix(aChaosPos, aTargetPos, easedProgress);
     
-    // Add a subtle nebula drift / breathing effect when aggregated
+    // Add subtle drift/breathing for both states
     if (easedProgress > 0.9) {
+      // Core state: tighter breathing
       newPos.x += sin(uTime * 1.3 + newPos.y * 1.7 + aRandom * 6.28) * 0.04;
       newPos.y += cos(uTime * 1.1 + newPos.x * 1.3 + aRandom * 6.28) * 0.03;
       newPos.z += cos(uTime * 1.5 + newPos.y * 1.5 + aRandom * 6.28) * 0.04;
+    } else if (easedProgress < 0.1) {
+      // Constellation state: gentler, larger-amplitude drift
+      newPos.x += sin(uTime * 0.6 + newPos.y * 0.4 + aRandom * 6.28) * 0.06;
+      newPos.y += cos(uTime * 0.5 + newPos.x * 0.3 + aRandom * 6.28) * 0.05;
+      newPos.z += cos(uTime * 0.7 + newPos.y * 0.5 + aRandom * 6.28) * 0.06;
     }
 
     vec4 mvPosition = modelViewMatrix * vec4(newPos, 1.0);
@@ -48,32 +55,47 @@ const vertexShader = `
     gl_PointSize = (4.0 * aRandom + 2.0) * (20.0 / -mvPosition.z);
     gl_Position = projectionMatrix * mvPosition;
 
-    // Color logic: Mix between Chaos warm gold/amber and Formed Nebula palette
-    // Nebula colors: deep blue, champagne gold, violet, ivory, cyan mist
-    vec3 chaosGold = vec3(0.91, 0.69, 0.22);   // Warm amber-gold for chaos
-    vec3 nebulaBlue = vec3(0.04, 0.10, 0.23);   // Deep space blue
-    vec3 champagne = vec3(0.83, 0.69, 0.22);     // Champagne gold
-    vec3 nebulaViolet = vec3(0.42, 0.36, 0.58);  // Nebula violet
-    vec3 cyanMist = vec3(0.53, 0.80, 0.93);      // Cyan mist
-    vec3 ivory = vec3(0.96, 0.90, 0.75);         // Soft ivory
+    // Color logic: Mix between Constellation (warm nebula blend) and Formed Nebula Core (deep blue/violet)
+    // Constellation: mix of amber, champagne, cyan, and soft violet — varied per particle
+    vec3 nebulaBlue = vec3(0.04, 0.10, 0.23);      // Deep space blue
+    vec3 champagne = vec3(0.83, 0.69, 0.22);        // Champagne gold
+    vec3 nebulaViolet = vec3(0.42, 0.36, 0.58);     // Nebula violet
+    vec3 cyanMist = vec3(0.53, 0.80, 0.93);         // Cyan mist
+    vec3 ivory = vec3(0.96, 0.90, 0.75);            // Soft ivory
+    vec3 warmAmber = vec3(0.91, 0.58, 0.20);        // Warm amber
     
-    // Pick a base color per particle based on its random seed
+    // Pick base color for formed (core) state
     float colorSelect = fract(aRandom * 7.13);
-    vec3 baseColor;
+    vec3 coreColor;
     if (colorSelect < 0.30) {
-      baseColor = champagne;
+      coreColor = champagne;
     } else if (colorSelect < 0.50) {
-      baseColor = nebulaViolet;
+      coreColor = nebulaViolet;
     } else if (colorSelect < 0.65) {
-      baseColor = cyanMist;
+      coreColor = cyanMist;
     } else if (colorSelect < 0.80) {
-      baseColor = ivory;
+      coreColor = ivory;
     } else {
-      baseColor = nebulaBlue;
+      coreColor = nebulaBlue;
     }
     
-    // Mix chaos gold with nebula base color based on progress
-    vColor = mix(chaosGold, baseColor, easedProgress);
+    // Constellation color: varied warm + cool blend, different per particle
+    float constSelect = fract(aRandom * 11.37);
+    vec3 constColor;
+    if (constSelect < 0.25) {
+      constColor = warmAmber;
+    } else if (constSelect < 0.50) {
+      constColor = champagne;
+    } else if (constSelect < 0.70) {
+      constColor = cyanMist;
+    } else if (constSelect < 0.85) {
+      constColor = nebulaViolet;
+    } else {
+      constColor = ivory;
+    }
+    
+    // Mix constellation color with core color based on progress
+    vColor = mix(constColor, coreColor, easedProgress);
     
     // Subtle sparkle/twinkle effect
     float sparkle = sin(uTime * 4.0 + aRandom * 100.0);
@@ -114,16 +136,17 @@ export const Foliage: React.FC<FoliageProps> = ({ mode, count }) => {
     const rnd = new Float32Array(count);
 
     for (let i = 0; i < count; i++) {
-      // 1. Chaos Positions: Random sphere (preserved from original - will be refined in v0.2)
-      const r = 25 * Math.cbrt(Math.random());
-      const theta = Math.random() * 2 * Math.PI;
-      const phi = Math.acos(2 * Math.random() - 1);
+      // 1. CHAOS / Constellation Positions: Memory Constellation field (v0.2)
+      // Replaces the old random-sphere explosion with a structured nebula field:
+      // Core Residue (r 1.5-4.5) + Constellation Ring (r 4.5-8.5) + Memory Cloud (r 7-12)
+      // With 2 gentle spiral arms woven through Layer B
+      const constPos = getConstellationDustPosition(i, count);
       
-      chaos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-      chaos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) + 5;
-      chaos[i * 3 + 2] = r * Math.cos(phi);
+      chaos[i * 3] = constPos.x;
+      chaos[i * 3 + 1] = constPos.y;
+      chaos[i * 3 + 2] = constPos.z;
 
-      // 2. Target Positions: Memory Nebula Core sphere (replaces Christmas tree cone)
+      // 2. Target Positions: Memory Nebula Core sphere
       // FORMED = Memory Core aggregated state
       const nebulaPos = getNebulaCorePosition(i, count);
       

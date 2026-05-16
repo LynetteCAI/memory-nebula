@@ -242,7 +242,7 @@ export const GestureController: React.FC<GestureControllerProps> = ({ onModeChan
         openFrames.current++;
         closedFrames.current = 0;
         
-        setGestureStatus("Detected: OPEN (Unleash)");
+        setGestureStatus("Detected: OPEN (Release Memory)");
 
         if (openFrames.current > CONFIDENCE_THRESHOLD) {
             if (lastModeRef.current !== TreeMode.CHAOS) {
@@ -252,11 +252,11 @@ export const GestureController: React.FC<GestureControllerProps> = ({ onModeChan
         }
 
       } else if (extendedFingers <= 1) {
-        // CLOSED FIST -> RESTORE (FORMED)
+        // CLOSED FIST -> COLLAPSE TO CORE
         closedFrames.current++;
         openFrames.current = 0;
         
-        setGestureStatus("Detected: CLOSED (Restore)");
+        setGestureStatus("Detected: CLOSED (Gather Core)");
 
         if (closedFrames.current > CONFIDENCE_THRESHOLD) {
             if (lastModeRef.current !== TreeMode.FORMED) {

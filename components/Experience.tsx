@@ -76,10 +76,10 @@ export const Experience: React.FC<ExperienceProps> = ({ mode, handPosition, uplo
       <OrbitControls 
         ref={controlsRef}
         enablePan={false} 
-        minPolarAngle={Math.PI / 4} 
-        maxPolarAngle={Math.PI / 1.8}
-        minDistance={10}
-        maxDistance={30}
+        minPolarAngle={Math.PI / 6} 
+        maxPolarAngle={Math.PI / 1.6}
+        minDistance={8}
+        maxDistance={35}
         enableDamping
         dampingFactor={0.05}
         enabled={true}
