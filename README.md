@@ -4,7 +4,7 @@
 
 ## 📝 版本
 
-**v0.4.1**：Chrono Stream Isolation & Background Reflow — 时间流手势隔离，固定视角，星云退至背景层（当前）。
+**v0.4.2**：Stellar Orbit Systems Polish — 恒星椭圆轨道系统升级，行星公转 + 轨道线可视化（当前）。
 
 ## 🛠️ 快速开始
 
@@ -105,7 +105,8 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - **v0.3.4** ✅ Memory Library Manager（当前）
 - **v0.4** ✅ Chrono Stream 时间流，按钮进入
 - **v0.4.1** ✅ Chrono Stream 手势隔离与背景退流
-- **v0.4.2** ⏳ 时间流视觉增强：日期刻度、星尘拉伸
+- **v0.4.2** ✅ 恒星椭圆轨道系统升级
+- **v0.4.3** ⏳ 时间流视觉增强：日期刻度、星尘拉伸
 - **v0.4.3** ⏳ 时间流手势切换：左右挥手上一张/下一张
 - **v0.5** ⏳ 增加推手势进入时间隧道
 
@@ -127,6 +128,40 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - 回忆管理器：上传、编辑、删除、批量操作（v0.3.4）
 - IndexedDB 本地持久化存储（v0.3.4）
 - JSON 导入/导出备份（v0.3.4）
+
+---
+
+## 🌌 v0.4.2 Stellar Orbit Systems Polish
+
+v0.4.2 将星云背景中的恒星系统进一步升级。每个次级恒星不再只是一个发光点，而成为一个局部星系中心；其周围的行星和卫星会沿着倾斜的椭圆轨道缓慢公转，并显示极淡的轨道线。
+
+### 轨道系统
+
+每颗 Stellar Body 周围：
+- **椭圆轨道**：行星沿椭圆轨道绕恒星缓慢公转（eccentricity 0.08–0.28）
+- **倾斜平面**：每个恒星系统有独立的轨道平面倾角（0.25–0.80 rad）
+- **个体扰动**：行星在系统倾角基础上还有一个微小个体倾角偏移（±0.10–0.20 rad）
+- **速度层次**：轨道越外层，公转越慢（orbitSpeed / √semiMajor）
+- **轨道线**：每个系统显示 2 条极淡的椭圆轨道线（opacity 0.06–0.16），additive blending
+
+### 模式差异
+
+| 模式 | 轨道半径 (Major) | 轨道半径 (Minor) | 轨道线可见度 |
+|------|:---:|:---:|:---:|
+| FORMED | 0.35–0.75 | 0.18–0.48 | 极淡 (0.06) |
+| CHAOS | 0.65–1.45 | 0.35–0.95 | 可见 (0.16) |
+| CHRONO_STREAM | 0.75–1.65 | 0.40–1.05 | 背景 (0.08) |
+
+FORMED 聚合态下轨道收紧围绕核心，CHAOS 展开态能清晰看到多个局部恒星系统，CHRONO_STREAM 作为背景层退到时间河后方。
+
+### 技术实现
+
+- **`PlanetBody`** 重构：从静态 `formedOffset/chaosOffset` 改为轨道参数（semiMajor/eccentricity/phase/orbitSpeed/inclination）
+- **`getEllipticalOrbitOffset()`**：每帧根据 elapsedTime 动态计算 XZ 椭圆位置 + Y 微摆，应用系统倾角 + 个体扰动
+- **`StellarSystem.orbitPlane`**：新增 `THREE.Quaternion`，每个系统的共享轨道平面
+- **`StellarSystem.chronoCenter`**：新增 Chrono Stream 模式专用中心位置
+- **`OrbitRingsRenderer`**：LineSegments + BufferGeometry（64 采样点），group 位置/缩放由 useFrame 更新
+- **InstancedMesh** 继续使用：Stellar（10）+ Major Planets（25）+ Minor Planets（95）
 
 ---
 
