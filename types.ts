@@ -51,15 +51,25 @@ export interface MemoryPhoto {
   story?: string;
   type?: MemoryType;
   source?: "local" | "uploaded" | "shared";
+  /** v0.3.4: Unix timestamp when created */
+  createdAt?: number;
+  /** v0.3.4: Unix timestamp of last update */
+  updatedAt?: number;
+  /** v0.3.4: Display ordering (lower = first). Falls back to createdAt if unset. */
+  order?: number;
+  /** v0.3.4: Original filename from upload */
+  fileName?: string;
 }
 
 /**
  * v0.3: Normalize an uploaded photo URL into a MemoryPhoto with sensible defaults.
+ * v0.3.4: Extended with optional metadata overrides and new fields.
  */
 export function normalizeUploadToMemoryPhoto(
   url: string,
   index: number,
-  total: number
+  total: number,
+  overrides?: Partial<MemoryPhoto>
 ): MemoryPhoto {
   const timestamp = Date.now();
   return {
@@ -72,5 +82,9 @@ export function normalizeUploadToMemoryPhoto(
     story: "以后可以在这里写下这张照片背后的故事。",
     type: "other",
     source: "uploaded",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    order: index,
+    ...overrides,
   };
 }

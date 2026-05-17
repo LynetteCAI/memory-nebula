@@ -6,7 +6,16 @@ import { Experience } from './components/Experience';
 import { UIOverlay } from './components/UIOverlay';
 import { GestureController } from './components/GestureController';
 import { MemoryModal } from './components/MemoryModal';
-import { TreeMode, MemoryPhoto, normalizeUploadToMemoryPhoto } from './types';
+import { MemoryManager } from './components/MemoryManager';
+import { TreeMode, MemoryPhoto } from './types';
+import {
+  getAllMemories,
+  saveMemory,
+  saveMemories,
+  deleteMemory,
+  deleteMemories,
+  clearMemories,
+} from './storage/memoryLibraryStore';
 
 // Simple Error Boundary to catch 3D resource loading errors (like textures)
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean}> {
@@ -49,10 +58,13 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 export default function App() {
   const [mode, setMode] = useState<TreeMode>(TreeMode.FORMED);
   const [handPosition, setHandPosition] = useState<{ x: number; y: number; detected: boolean }>({ x: 0.5, y: 0.5, detected: false });
-  const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [isLoadingShare, setIsLoadingShare] = useState(false);
   const [isSharedView, setIsSharedView] = useState(false);
   const [twoHandsDetected, setTwoHandsDetected] = useState(false);
+  
+  // v0.3.4: Primary data source — memories loaded from IndexedDB
+  const [memories, setMemories] = useState<MemoryPhoto[]>([]);
+  const [isLibraryLoading, setIsLibraryLoading] = useState(true);
   
   // v0.3: Memory detail modal state
   const [selectedMemory, setSelectedMemory] = useState<MemoryPhoto | null>(null);
@@ -63,17 +75,63 @@ export default function App() {
   const [candidateMemory, setCandidateMemory] = useState<MemoryPhoto | null>(null);
   const [lockedMemory, setLockedMemory] = useState<MemoryPhoto | null>(null);
 
+  // v0.3.4: Memory manager panel state
+  const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
+
   // v0.3 + v0.3.1: Pause navigation when modal is open
   const gestureNavigationEnabled = selectedMemory === null;
   // v0.3.1: Enable gesture photo selection only when modal is NOT open
   const gesturePhotoSelectionEnabled = selectedMemory === null;
 
-  // v0.3: Derive MemoryPhoto[] from uploadedPhotos
-  const memories = useMemo<MemoryPhoto[]>(() => {
-    return uploadedPhotos.map((url, i) =>
-      normalizeUploadToMemoryPhoto(url, i, uploadedPhotos.length)
-    );
-  }, [uploadedPhotos]);
+  // v0.3.4: Derive photo URLs from memories for Polaroids rendering
+  const memoryUrls = useMemo(() => memories.map((m) => m.url), [memories]);
+
+  // v0.3.4: Load memories from IndexedDB on mount
+  useEffect(() => {
+    getAllMemories()
+      .then((loaded) => setMemories(loaded))
+      .catch((err) => console.error('Failed to load memories from IndexedDB:', err))
+      .finally(() => setIsLibraryLoading(false));
+  }, []);
+
+  // v0.3.4: CRUD handlers — write to IndexedDB then update React state
+  const handleBulkCreateMemories = useCallback(async (newMemories: MemoryPhoto[]) => {
+    await saveMemories(newMemories);
+    setMemories((prev) => [...prev, ...newMemories]);
+  }, []);
+
+  const handleUpdateMemory = useCallback(async (memory: MemoryPhoto) => {
+    await saveMemory(memory);
+    setMemories((prev) => prev.map((m) => (m.id === memory.id ? memory : m)));
+    // Sync selectedMemory if it's the one being edited
+    setSelectedMemory((prev) => (prev?.id === memory.id ? memory : prev));
+  }, []);
+
+  const handleDeleteMemory = useCallback(async (id: string) => {
+    await deleteMemory(id);
+    setMemories((prev) => prev.filter((m) => m.id !== id));
+    // Close modal / clear locked / clear candidate if deleted
+    setSelectedMemory((prev) => (prev?.id === id ? null : prev));
+    setLockedMemory((prev) => (prev?.id === id ? null : prev));
+    setCandidateMemory((prev) => (prev?.id === id ? null : prev));
+  }, []);
+
+  const handleDeleteMemories = useCallback(async (ids: string[]) => {
+    await deleteMemories(ids);
+    const idSet = new Set(ids);
+    setMemories((prev) => prev.filter((m) => !idSet.has(m.id)));
+    setSelectedMemory((prev) => (prev && idSet.has(prev.id) ? null : prev));
+    setLockedMemory((prev) => (prev && idSet.has(prev.id) ? null : prev));
+    setCandidateMemory((prev) => (prev && idSet.has(prev.id) ? null : prev));
+  }, []);
+
+  const handleClearAllMemories = useCallback(async () => {
+    await clearMemories();
+    setMemories([]);
+    setSelectedMemory(null);
+    setLockedMemory(null);
+    setCandidateMemory(null);
+  }, []);
 
   // v0.3.1: Clear locked photo when mode goes to FORMED (core collapsed)
   const prevModeRef = useRef<TreeMode>(mode);
@@ -117,7 +175,21 @@ export default function App() {
           const data = await response.json();
 
           if (response.ok && data.success) {
-            setUploadedPhotos(data.images);
+            // v0.3.4: Convert shared URLs to MemoryPhoto[] and store in IndexedDB
+            const now = Date.now();
+            const sharedMemories: MemoryPhoto[] = (data.images as string[]).map((url, i) => ({
+              id: `shared-${i}-${now}`,
+              url,
+              title: `分享回忆 ${i + 1}`,
+              date: new Date().toISOString().slice(0, 10),
+              type: 'other' as const,
+              source: 'shared' as const,
+              createdAt: now,
+              updatedAt: now,
+              order: i,
+            }));
+            await saveMemories(sharedMemories);
+            setMemories(sharedMemories);
             return;
           }
         } catch (apiError) {
@@ -128,7 +200,20 @@ export default function App() {
         const shareDataStr = localStorage.getItem(`share_${shareId}`);
         if (shareDataStr) {
           const shareData = JSON.parse(shareDataStr);
-          setUploadedPhotos(shareData.images);
+          const now = Date.now();
+          const sharedMemories: MemoryPhoto[] = (shareData.images as string[]).map((url, i) => ({
+            id: `shared-${i}-${now}`,
+            url,
+            title: `分享回忆 ${i + 1}`,
+            date: new Date().toISOString().slice(0, 10),
+            type: 'other' as const,
+            source: 'shared' as const,
+            createdAt: now,
+            updatedAt: now,
+            order: i,
+          }));
+          await saveMemories(sharedMemories);
+          setMemories(sharedMemories);
         } else {
           console.error('Share not found');
         }
@@ -198,10 +283,6 @@ export default function App() {
     setModalOpenedAt(performance.now()); // v0.3.2: record open time for grace
   }, []);
 
-  const handlePhotosUpload = (photos: string[]) => {
-    setUploadedPhotos(photos);
-  };
-
   return (
     <div className="w-full h-screen relative bg-gradient-to-b from-black via-[#0a0a1a] to-[#0d1b2a]">
       <ErrorBoundary>
@@ -215,7 +296,7 @@ export default function App() {
             <Experience
               mode={mode}
               handPosition={handPosition}
-              uploadedPhotos={uploadedPhotos}
+              uploadedPhotos={memoryUrls}
               twoHandsDetected={twoHandsDetected}
               memories={memories}
               focusedPhotoId={focusedPhotoId}
@@ -240,9 +321,8 @@ export default function App() {
       <UIOverlay 
         mode={mode} 
         onToggle={toggleMode} 
-        onPhotosUpload={handlePhotosUpload} 
-        hasPhotos={uploadedPhotos.length > 0}
-        uploadedPhotos={uploadedPhotos}
+        onManageMemories={() => setMemoryManagerOpen(true)}
+        memoryCount={memories.length}
         isSharedView={isSharedView}
       />
       
@@ -289,7 +369,7 @@ export default function App() {
       )}
       
       {/* v0.3.1-lite: Gesture photo selection status hint */}
-      {!selectedMemory && uploadedPhotos.length > 0 && (
+      {!selectedMemory && memories.length > 0 && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity duration-300">
           <div className="bg-black/50 backdrop-blur-sm border border-[#D4AF37]/20 rounded-full px-5 py-2">
             {candidateMemory ? (
@@ -306,13 +386,24 @@ export default function App() {
       )}
       
       {/* v0.3.1: Center crosshair (subtle, only in CHAOS with photos, not during modal) */}
-      {mode === TreeMode.CHAOS && uploadedPhotos.length > 0 && !selectedMemory && (
+      {mode === TreeMode.CHAOS && memories.length > 0 && !selectedMemory && (
         <div className="fixed inset-0 z-10 pointer-events-none flex items-center justify-center">
           <div className="w-8 h-8 rounded-full border border-[#D4AF37]/15 flex items-center justify-center">
             <div className="w-1 h-1 rounded-full bg-[#D4AF37]/25" />
           </div>
         </div>
       )}
+      {/* v0.3.4: Memory Library Manager */}
+      <MemoryManager
+        open={memoryManagerOpen}
+        memories={memories}
+        onClose={() => setMemoryManagerOpen(false)}
+        onCreateMany={handleBulkCreateMemories}
+        onUpdate={handleUpdateMemory}
+        onDelete={handleDeleteMemory}
+        onDeleteMany={handleDeleteMemories}
+        onClearAll={handleClearAllMemories}
+      />
     </div>
   );
 }
