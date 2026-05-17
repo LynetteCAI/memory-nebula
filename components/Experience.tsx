@@ -1,13 +1,14 @@
 
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Environment, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette, Noise } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Foliage } from './Foliage';
 import { Ornaments } from './Ornaments';
 import { Polaroids } from './Polaroids';
 import { TreeStar } from './TreeStar';
+import { ChronoStreamRibbon } from './ChronoStreamRibbon';
 import { TreeMode, MemoryPhoto } from '../types';
 
 interface ExperienceProps {
@@ -31,6 +32,8 @@ interface ExperienceProps {
   lockedPhotoId?: string | null;
   /** v0.3.1: Pause candidate updates when modal is open */
   pauseSelection?: boolean;
+  /** v0.4: Current focus index for Chrono Stream time river */
+  focusIndex?: number;
 }
 
 export const Experience: React.FC<ExperienceProps> = ({
@@ -46,11 +49,25 @@ export const Experience: React.FC<ExperienceProps> = ({
   onCandidatePhotoChange,
   lockedPhotoId,
   pauseSelection,
+  focusIndex = 0,
 }) => {
   const controlsRef = useRef<any>(null);
+  const { camera } = useThree();
+  const isChrono = mode === TreeMode.CHRONO_STREAM;
 
-  // Update camera rotation based on hand position
+  // v0.4.1: Initialize camera to fixed position when entering Chrono Stream
+  useEffect(() => {
+    if (!isChrono || !controlsRef.current) return;
+    const controls = controlsRef.current;
+    // Set a stable, centered view for the time river
+    camera.position.set(0, 1.2, 9);
+    controls.target.set(0, 0, -1);
+    controls.update();
+  }, [isChrono, camera]);
+
+  // Update camera rotation based on hand position (v0.4.1: skip in Chrono Stream)
   useFrame((_, delta) => {
+    if (isChrono) return;
     if (controlsRef.current && handPosition.detected) {
       const controls = controlsRef.current;
       
@@ -110,7 +127,7 @@ export const Experience: React.FC<ExperienceProps> = ({
         maxDistance={35}
         enableDamping
         dampingFactor={0.05}
-        enabled={true}
+        enabled={!isChrono}
       />
 
       {/* Lighting Setup for Deep Space Memory Nebula */}
@@ -128,9 +145,14 @@ export const Experience: React.FC<ExperienceProps> = ({
       <pointLight position={[-8, 3, -8]} intensity={0.8} color="#6B5B95" /> {/* Violet fill */}
       <pointLight position={[5, -2, 5]} intensity={0.5} color="#88CCEE" /> {/* Cyan rim */}
 
-      <group position={[0, 0, 0]}>
+      {/* v0.4.1: Background layer — Foliage & Ornaments shift back in Chrono Stream */}
+      <group
+        position={isChrono ? [0, 0, -12] : [0, 0, 0]}
+        scale={isChrono ? 1.35 : 1}
+      >
         <Foliage mode={mode} count={6000} />
         <Ornaments mode={mode} count={600} />
+      </group>
         <Polaroids
           mode={mode}
           uploadedPhotos={uploadedPhotos}
@@ -143,9 +165,14 @@ export const Experience: React.FC<ExperienceProps> = ({
           onCandidatePhotoChange={onCandidatePhotoChange}
           lockedPhotoId={lockedPhotoId}
           pauseSelection={pauseSelection}
+          focusIndex={focusIndex}
         />
         {/* <TreeStar mode={mode} /> */}
-      </group>
+        
+        {/* v0.4: Chrono Stream time ribbon */}
+        {mode === TreeMode.CHRONO_STREAM && (
+          <ChronoStreamRibbon memoryCount={uploadedPhotos.length} />
+        )}
 
       <EffectComposer enableNormalPass={false}>
         <Bloom 

@@ -13,7 +13,9 @@
  */
 export enum TreeMode {
   CHAOS = 'CHAOS',
-  FORMED = 'FORMED'
+  FORMED = 'FORMED',
+  /** v0.4: Chrono Stream — memories arranged by date along a time river */
+  CHRONO_STREAM = 'CHRONO_STREAM'
 }
 
 export interface Coordinates {

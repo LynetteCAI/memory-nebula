@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { TreeMode, MemoryPhoto } from '../types';
 import { getNebulaPhotoPosition, getNebulaPhotoScale } from '../utils/nebulaLayout';
 import { getConstellationPhotoPosition, getConstellationPhotoScale } from '../utils/constellationLayout';
+import { getChronoStreamPhotoPosition, getChronoStreamPhotoScale, getChronoStreamPhotoOpacity } from '../utils/chronoStreamLayout';
 
 // ---------------------------------------------------------------------------
 //  v0.3.1 Constants
@@ -41,6 +42,8 @@ interface PolaroidsProps {
   lockedPhotoId?: string | null;
   /** v0.3.1: Pause candidate updates (e.g. when modal is open) */
   pauseSelection?: boolean;
+  /** v0.4: Current focus index for Chrono Stream time river */
+  focusIndex?: number;
 }
 
 interface PhotoData {
@@ -51,6 +54,8 @@ interface PhotoData {
   speed: number;
   formedScale: number;
   chaosScale: number;
+  /** v0.4: Opacity for Chrono Stream time river layering */
+  opacity: number;
 }
 
 interface PolaroidItemProps {
@@ -170,7 +175,7 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
         <cylinderGeometry args={[0.003, 0.003, 0.8]} />
         <meshStandardMaterial
           color="#D4AF37" metalness={1} roughness={0.2} transparent
-          opacity={highlightLevel >= 3 ? 0.7 : highlightLevel >= 2 ? 0.6 : highlightLevel === 1 ? 0.5 : 0.4}
+          opacity={data.opacity * (highlightLevel >= 3 ? 0.7 : highlightLevel >= 2 ? 0.6 : highlightLevel === 1 ? 0.5 : 0.4)}
         />
       </mesh>
 
@@ -262,6 +267,7 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
   onCandidatePhotoChange,
   lockedPhotoId,
   pauseSelection,
+  focusIndex = 0,
 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const [closestPhotoIndex, setClosestPhotoIndex] = React.useState<number>(0);
@@ -277,11 +283,24 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
     if (uploadedPhotos.length === 0) return [];
     const data: PhotoData[] = [];
     const count = uploadedPhotos.length;
+    const isChrono = mode === TreeMode.CHRONO_STREAM;
     for (let i = 0; i < count; i++) {
       const targetPos = getNebulaPhotoPosition(i, count);
-      const chaosPos = getConstellationPhotoPosition(i, count);
-      const formedScale = getNebulaPhotoScale(i, count);
-      const chaosScale = getConstellationPhotoScale(i, count);
+      let chaosPos: THREE.Vector3;
+      let formedScale: number;
+      let chaosScale: number;
+
+      if (isChrono) {
+        const pos = getChronoStreamPhotoPosition(i, focusIndex, count);
+        chaosPos = new THREE.Vector3(pos[0], pos[1], pos[2]);
+        formedScale = getChronoStreamPhotoScale(i, focusIndex, count);
+        chaosScale = getChronoStreamPhotoScale(i, focusIndex, count);
+      } else {
+        chaosPos = getConstellationPhotoPosition(i, count);
+        formedScale = getNebulaPhotoScale(i, count);
+        chaosScale = getConstellationPhotoScale(i, count);
+      }
+
       data.push({
         id: i,
         url: uploadedPhotos[i],
@@ -290,10 +309,11 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
         speed: 0.8 + Math.random() * 1.5,
         formedScale,
         chaosScale,
+        opacity: isChrono ? getChronoStreamPhotoOpacity(i, focusIndex, count) : 1,
       });
     }
     return data;
-  }, [uploadedPhotos]);
+  }, [uploadedPhotos, mode, focusIndex]);
 
   const handlePhotoClick = useCallback(
     (index: number) => (e: ThreeEvent<MouseEvent>) => {
@@ -312,8 +332,10 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
   const lastCandidateRef = useRef<string | null>(null);
 
   useFrame((state) => {
+    // v0.4: In CHRONO_STREAM, candidate is determined by focusIndex (handled in App.tsx), skip detection
     if (pauseSelection || !groupRef.current || photoData.length === 0) return;
-
+    if (mode === TreeMode.CHRONO_STREAM) return;
+    
     // --- Screen-center projection for candidate ---
     const camera = state.camera;
     const frustum = new THREE.Frustum();

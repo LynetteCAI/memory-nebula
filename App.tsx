@@ -8,6 +8,7 @@ import { GestureController } from './components/GestureController';
 import { MemoryModal } from './components/MemoryModal';
 import { MemoryManager } from './components/MemoryManager';
 import { TreeMode, MemoryPhoto } from './types';
+import { compareMemoryByTime } from './utils/memorySort';
 import {
   getAllMemories,
   saveMemory,
@@ -78,13 +79,33 @@ export default function App() {
   // v0.3.4: Memory manager panel state
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
 
+  // v0.4: Chrono Stream state
+  const [focusIndex, setFocusIndex] = useState(0);
+
+  // v0.4: Chrono-sorted memories (by date, then createdAt, then order)
+  const chronoMemories = useMemo(() => {
+    return [...memories].sort(compareMemoryByTime);
+  }, [memories]);
+
+  // v0.4: Display memories — chrono-sorted in CHRONO_STREAM, original order otherwise
+  const displayMemories = useMemo(() => {
+    return mode === TreeMode.CHRONO_STREAM ? chronoMemories : memories;
+  }, [mode, memories, chronoMemories]);
+
+  // v0.4: Display URLs derived from displayMemories
+  const displayUrls = useMemo(() => displayMemories.map((m) => m.url), [displayMemories]);
+
   // v0.3 + v0.3.1: Pause navigation when modal is open
-  const gestureNavigationEnabled = selectedMemory === null;
+  // v0.4.1: Also pause in Chrono Stream (fixed camera)
+  const isChronoMode = mode === TreeMode.CHRONO_STREAM;
+  const gestureNavigationEnabled = selectedMemory === null && !isChronoMode;
   // v0.3.1: Enable gesture photo selection only when modal is NOT open
-  const gesturePhotoSelectionEnabled = selectedMemory === null;
+  // v0.4.1: Also disable in Chrono Stream (no pinch)
+  const gesturePhotoSelectionEnabled = selectedMemory === null && !isChronoMode;
 
   // v0.3.4: Derive photo URLs from memories for Polaroids rendering
-  const memoryUrls = useMemo(() => memories.map((m) => m.url), [memories]);
+  // v0.4: Uses displayUrls (chrono-sorted in CHRONO_STREAM, original order otherwise)
+  const memoryUrls = displayUrls;
 
   // v0.3.4: Load memories from IndexedDB on mount
   useEffect(() => {
@@ -142,9 +163,70 @@ export default function App() {
     prevModeRef.current = mode;
   }, [mode]);
 
+  // v0.4: Chrono Stream focus navigation
+  const clampFocusIndex = useCallback((idx: number) => {
+    if (chronoMemories.length === 0) return 0;
+    return Math.max(0, Math.min(idx, chronoMemories.length - 1));
+  }, [chronoMemories.length]);
+
+  const goPrevMemory = useCallback(() => {
+    setFocusIndex((prev) => Math.max(0, prev - 1));
+  }, []);
+
+  const goNextMemory = useCallback(() => {
+    setFocusIndex((prev) => clampFocusIndex(prev + 1));
+  }, [clampFocusIndex]);
+
+  // v0.4: Exit Chrono Stream back to constellation
+  const exitChronoStream = useCallback(() => {
+    setCandidateMemory(null);
+    setLockedMemory(null);
+    setMode(TreeMode.CHAOS);
+  }, []);
+
+  // v0.4: Mouse wheel navigation in Chrono Stream (throttled)
+  useEffect(() => {
+    if (mode !== TreeMode.CHRONO_STREAM || selectedMemory) return;
+
+    let lastWheelTime = 0;
+    const WHEEL_COOLDOWN_MS = 400;
+
+    const onWheel = (e: WheelEvent) => {
+      const now = performance.now();
+      if (now - lastWheelTime < WHEEL_COOLDOWN_MS) return;
+      lastWheelTime = now;
+
+      if (e.deltaY > 0) {
+        goNextMemory();
+      } else if (e.deltaY < 0) {
+        goPrevMemory();
+      }
+    };
+
+    window.addEventListener('wheel', onWheel, { passive: true });
+    return () => window.removeEventListener('wheel', onWheel);
+  }, [mode, selectedMemory, goPrevMemory, goNextMemory]);
+
   // v0.3.1: Esc key logic: close modal OR clear locked photo
+  // v0.4: Extended for Chrono Stream navigation (ArrowLeft/Right, A/D, Esc return)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // v0.4: Chrono Stream navigation (only when no modal open)
+      if (mode === TreeMode.CHRONO_STREAM && !selectedMemory) {
+        if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+          goPrevMemory();
+          return;
+        }
+        if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+          goNextMemory();
+          return;
+        }
+        if (e.key === 'Escape') {
+          exitChronoStream();
+          return;
+        }
+      }
+
       if (e.key === 'Escape') {
         if (selectedMemory) {
           setSelectedMemory(null);
@@ -155,7 +237,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedMemory, lockedMemory]);
+  }, [selectedMemory, lockedMemory, mode, goPrevMemory, goNextMemory, exitChronoStream]);
 
   // Check for share parameter in URL on mount
   useEffect(() => {
@@ -250,11 +332,33 @@ export default function App() {
     setCandidateMemory(photo);
   };
 
+  // v0.4: Clamp focusIndex when chronoMemories length changes
+  useEffect(() => {
+    if (focusIndex >= chronoMemories.length && chronoMemories.length > 0) {
+      setFocusIndex(clampFocusIndex(focusIndex));
+    }
+  }, [chronoMemories.length, focusIndex, clampFocusIndex]);
+
+  // v0.4: Enter Chrono Stream
+  const enterChronoStream = useCallback(() => {
+    if (memories.length === 0) return;
+    if (selectedMemory) return; // don't enter while modal is open
+    setCandidateMemory(null);
+    setLockedMemory(null);
+    setFocusIndex(clampFocusIndex(0));
+    setMode(TreeMode.CHRONO_STREAM);
+  }, [memories.length, selectedMemory, clampFocusIndex]);
+
   // v0.3.1-lite: Ref for pinch callback to avoid stale closure
   const candidateMemoryRef = useRef<MemoryPhoto | null>(null);
   useEffect(() => {
-    candidateMemoryRef.current = candidateMemory;
-  }, [candidateMemory]);
+    // v0.4: In CHRONO_STREAM, candidate is always the focused photo
+    if (mode === TreeMode.CHRONO_STREAM && chronoMemories.length > 0) {
+      candidateMemoryRef.current = chronoMemories[focusIndex] ?? null;
+    } else {
+      candidateMemoryRef.current = candidateMemory;
+    }
+  }, [candidateMemory, mode, chronoMemories, focusIndex]);
 
   // v0.3.1-lite: Two-hands lock (kept but unused in lite mode)
   const handleLockPhotoGesture = useCallback(() => {
@@ -296,16 +400,21 @@ export default function App() {
             <Experience
               mode={mode}
               handPosition={handPosition}
-              uploadedPhotos={memoryUrls}
+              uploadedPhotos={displayUrls}
               twoHandsDetected={twoHandsDetected}
-              memories={memories}
+              memories={displayMemories}
               focusedPhotoId={focusedPhotoId}
               onPhotoSelect={(photo) => { setSelectedMemory(photo); setModalOpenedAt(performance.now()); }}
               onFocusedPhotoIdChange={handleFocusedPhotoIdChange}
-              candidatePhotoId={candidateMemory?.id ?? null}
+              candidatePhotoId={
+                mode === TreeMode.CHRONO_STREAM
+                  ? (chronoMemories[focusIndex]?.id ?? null)
+                  : (candidateMemory?.id ?? null)
+              }
               onCandidatePhotoChange={handleCandidatePhotoChange}
               lockedPhotoId={lockedMemory?.id ?? null}
               pauseSelection={selectedMemory !== null}
+              focusIndex={focusIndex}
             />
           </Suspense>
         </Canvas>
@@ -324,6 +433,13 @@ export default function App() {
         onManageMemories={() => setMemoryManagerOpen(true)}
         memoryCount={memories.length}
         isSharedView={isSharedView}
+        onEnterChronoStream={enterChronoStream}
+        onExitChronoStream={exitChronoStream}
+        onPrevMemory={goPrevMemory}
+        onNextMemory={goNextMemory}
+        focusIndex={focusIndex}
+        chronoMemories={chronoMemories}
+        selectedMemory={selectedMemory}
       />
       
       {/* Loading indicator for shared photos */}
@@ -343,12 +459,17 @@ export default function App() {
         onTwoHandsDetected={handleTwoHandsDetected}
         gestureNavigationEnabled={gestureNavigationEnabled}
         gesturePhotoSelectionEnabled={gesturePhotoSelectionEnabled}
-        hasCandidatePhoto={candidateMemory !== null}
+        hasCandidatePhoto={
+          mode === TreeMode.CHRONO_STREAM
+            ? chronoMemories.length > 0 && focusIndex < chronoMemories.length
+            : candidateMemory !== null
+        }
         onLockPhotoGesture={handleLockPhotoGesture}
         onPinchConfirm={handlePinchConfirm}
         modalOpen={selectedMemory !== null}
         modalOpenedAt={modalOpenedAt}
         onModalCloseGesture={handleModalCloseGesture}
+        disableGestureActions={isChronoMode}
       />
       
       {/* v0.3: Memory Detail Modal — replaces old two-hand photo overlay */}
@@ -369,7 +490,7 @@ export default function App() {
       )}
       
       {/* v0.3.1-lite: Gesture photo selection status hint */}
-      {!selectedMemory && memories.length > 0 && (
+      {!selectedMemory && memories.length > 0 && mode !== TreeMode.CHRONO_STREAM && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity duration-300">
           <div className="bg-black/50 backdrop-blur-sm border border-[#D4AF37]/20 rounded-full px-5 py-2">
             {candidateMemory ? (
@@ -381,6 +502,17 @@ export default function App() {
                 移动视角 · 让照片靠近中心
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* v0.4: Chrono Stream pinch hint */}
+      {!selectedMemory && memories.length > 0 && mode === TreeMode.CHRONO_STREAM && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity duration-300">
+          <div className="bg-black/50 backdrop-blur-sm border border-[#D4AF37]/20 rounded-full px-5 py-2">
+            <p className="text-[#D4AF37]/70 font-serif text-sm tracking-wide text-center">
+              捏合手指 · 打开当前回忆
+            </p>
           </div>
         </div>
       )}

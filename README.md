@@ -4,7 +4,7 @@
 
 ## 📝 版本
 
-**v0.3.4**：Memory Library Manager — 网页端回忆管理器，支持上传、编辑、删除、批量操作、IndexedDB 持久化（当前）。
+**v0.4.1**：Chrono Stream Isolation & Background Reflow — 时间流手势隔离，固定视角，星云退至背景层（当前）。
 
 ## 🛠️ 快速开始
 
@@ -103,9 +103,11 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - **v0.3.2** ✅ 握拳保持关闭照片详情
 - **v0.3.3** ✅ 展开态照片朝向相机
 - **v0.3.4** ✅ Memory Library Manager（当前）
-- **v0.4** 新增时间隧道模式，先用按钮进入
-- **v0.5** 增加推手势进入时间隧道
-- **v0.6** 加纪念日终章、信件、音乐、分享
+- **v0.4** ✅ Chrono Stream 时间流，按钮进入
+- **v0.4.1** ✅ Chrono Stream 手势隔离与背景退流
+- **v0.4.2** ⏳ 时间流视觉增强：日期刻度、星尘拉伸
+- **v0.4.3** ⏳ 时间流手势切换：左右挥手上一张/下一张
+- **v0.5** ⏳ 增加推手势进入时间隧道
 
 ## ✨ 功能
 
@@ -125,6 +127,105 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - 回忆管理器：上传、编辑、删除、批量操作（v0.3.4）
 - IndexedDB 本地持久化存储（v0.3.4）
 - JSON 导入/导出备份（v0.3.4）
+
+---
+
+## 🔒 v0.4.1 Chrono Stream Isolation & Background Reflow
+
+v0.4.1 将 Chrono Stream 时间流从星云手势系统中完整隔离，使其成为一个独立的、固定视角的时间流浏览模式。
+
+### 手势隔离
+
+进入 Chrono Stream 后，所有星云手势完全暂停：
+
+- ❌ 手势移动不会改变相机视角
+- ❌ 张手不会返回星云（Memory Constellation）
+- ❌ 握拳不会收拢核心（Memory Core）
+- ❌ 捏合不会打开照片详情
+- ❌ 照片详情中握拳不会关闭弹窗
+- ✅ 摄像头预览和 Debug HUD 仍然活跃
+
+退出 Chrono Stream 后，所有手势立即完全恢复。
+
+### 固定视角
+
+- OrbitControls 在 Chrono Stream 中被禁用（`enabled={false}`）
+- 进入时相机自动重置到固定位置：`[0, 1.2, 9]`，目标点 `[0, 0, -1]`
+- 鼠标拖拽不改变视角，滚轮仅用于切换上一段/下一段回忆
+- 时间流照片在视野中央清晰可见
+
+### 背景退流
+
+Foliage（星尘）和 Ornaments（恒星系统/行星）在 Chrono Stream 中整体后退：
+- 位置：`[0, 0, -12]`（退到照片后方深处）
+- 缩放：`1.35×`（略微放大以填充背景）
+- ChronoStreamRibbon 延长至 x = -18 到 +18，亮度降低，作为淡色时间河背景
+
+### 允许的交互
+
+| 交互 | Chrono Stream | 星云模式 |
+|------|:---:|:---:|
+| 鼠标点击照片 | ✅ | ✅ |
+| 左右键 / A-D | ✅ | ❌ |
+| 滚轮切换回忆 | ✅ | ❌ |
+| HUD 按钮 | ✅ | ❌ |
+| Esc 关闭弹窗 | ✅ | ✅ |
+| Esc 返回星云 | ✅ | ❌ |
+| 手势导航 | ❌ | ✅ |
+| 张手展开 | ❌ | ✅ |
+| 握拳收拢 | ❌ | ✅ |
+| 捏合打开 | ❌ | ✅ |
+| Modal 握拳关闭 | ❌ | ✅ |
+
+### 技术实现
+
+- **`GestureController.disableGestureActions`**：新增 prop，为 `true` 时跳过所有 open/fist/pinch/modal-close 处理
+- **`App.tsx`**：`isChronoMode` 统一控制 `gestureNavigationEnabled`、`gesturePhotoSelectionEnabled`、`disableGestureActions`
+- **`Experience.tsx`**：`OrbitControls enabled={!isChrono}`，进入 Chrono 时 `useEffect` 初始化相机
+- **背景组**：Foliage + Ornaments 包裹在独立 group 中，Chrono Stream 时 `position=[0,0,-12] scale=1.35`
+
+---
+
+## 🌊 v0.4 Chrono Stream
+
+v0.4 新增时间流模式（Chrono Stream）。Memory Constellation 强调空间中散落的碎片回忆，而 Chrono Stream 强调回忆的时间顺序。用户可以在星云展开态点击"进入时间流"，照片会按日期从早到晚排序并重排成一条发光时间河。当前回忆位于中央，前后回忆沿时间流延展。用户可以用左右键、按钮或滚轮切换回忆，并点击或捏合打开详情。
+
+### 使用方式
+
+1. **进入时间流**：在 Memory Constellation 展开态，右侧会出现"进入时间流"按钮。点击后，照片按日期（从早到晚）重新排列成一条水平时间河。
+2. **切换回忆**：
+   - 键盘：← 或 A（上一段）、→ 或 D（下一段）
+   - 按钮：点击底部 HUD 上的"上一段" / "下一段"
+   - 滚轮：向上滚动（上一段）、向下滚动（下一段），有 400ms 节流
+3. **打开详情**：点击当前焦点照片或捏合手指，打开 MemoryModal 查看完整回忆信息。
+4. **返回星云**：按 Esc 或点击"回到星云"按钮，返回 Memory Constellation 展开态。
+5. **HUD 信息**：底部显示当前序号、照片标题、日期和地点。
+
+### 排序规则
+
+照片按以下优先级排序：
+1. 有 `date` 字段的按日期从早到晚
+2. `date` 无效或为空的排在最后
+3. 相同 `date` 按 `createdAt` 时间戳排序
+4. 相同 `createdAt` 按 `order` 排序
+5. 以上都不存在则保持原顺序
+
+### 技术实现
+
+- **新增模式**：`TreeMode.CHRONO_STREAM`，与 `FORMED`/`CHAOS` 兼容共存
+- **排序工具**：`utils/memorySort.ts` — `compareMemoryByTime()` 按多级规则排序
+- **布局引擎**：`utils/chronoStreamLayout.ts` — 计算时间河中的位置、缩放、透明度
+- **时间光带**：`components/ChronoStreamRibbon.tsx` — 金色+蓝色 CatmullRomCurve 管几何体
+- **焦点导航**：`focusIndex` 状态 + `goPrevMemory()` / `goNextMemory()` + 自动 clamp
+- **键盘/滚轮**：在 `CHRONO_STREAM` 模式下拦截 ArrowLeft/Right、A/D、Escape、鼠标滚轮
+- **Pinch 适配**：在 `CHRONO_STREAM` 中，当前焦点照片即为候选，捏合直接打开
+
+### 设计取舍
+
+- **第一版不使用手势进入**：v0.4.1 将加入左右挥手切换，v0.5 将实现双手推开进入时间流
+- **不做隧道墙体**：保持轻量，第一版以功能验证为主
+- **不修改 Foliage/Ornaments 位置**：保持星尘背景，后续版本再做星尘拉伸
+- **照片朝向相机**：CHRONO_STREAM 中照片使用 camera-facing 逻辑，保证可见性
 
 ---
 

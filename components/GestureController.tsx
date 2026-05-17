@@ -81,6 +81,9 @@ interface GestureControllerProps {
   modalOpenedAt?: number;
   /** Called when fist hold triggers in modal mode: close the modal */
   onModalCloseGesture?: () => void;
+  /** v0.4.1: Completely disable all gesture actions (open/fist/pinch/nav/modal-close).
+   *  Camera preview and debug HUD remain active. */
+  disableGestureActions?: boolean;
 }
 
 export const GestureController: React.FC<GestureControllerProps> = ({ 
@@ -96,6 +99,7 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   modalOpen = false,
   modalOpenedAt = 0,
   onModalCloseGesture,
+  disableGestureActions = false,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -116,6 +120,8 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   // v0.3.2: Post-modal grace to prevent accidental fist trigger after closing
   const modalClosedAtRef = useRef(0);
   const prevModalOpenRef = useRef(modalOpen);
+  // v0.4.1: Ref for disableGestureActions to keep fresh in detection closure
+  const disableActionsRef = useRef(disableGestureActions);
   
   // -------------------------------------------------------------------------
   // v0.2.1 Stable-hold trigger state (replaces old frame-count debounce)
@@ -194,6 +200,8 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   }, [modalOpen]);
   useEffect(() => { modalOpenedAtRef.current = modalOpenedAt; }, [modalOpenedAt]);
   useEffect(() => { onModalCloseGestureRef.current = onModalCloseGesture; }, [onModalCloseGesture]);
+  // v0.4.1: sync disableGestureActions ref
+  useEffect(() => { disableActionsRef.current = disableGestureActions; }, [disableGestureActions]);
 
   useEffect(() => {
     let handLandmarker: HandLandmarker | null = null;
@@ -398,6 +406,13 @@ export const GestureController: React.FC<GestureControllerProps> = ({
       } else if (onHandPosition && !gestureNavigationEnabledRef.current) {
         // Navigation paused but hand IS detected — signal presence without position
         onHandPosition(0.5, 0.5, false);
+      }
+
+      // v0.4.1: If gesture actions are globally disabled (e.g. Chrono Stream),
+      // skip ALL open/fist/pinch/modal-close processing. Camera preview still active.
+      if (disableActionsRef.current) {
+        setGestureStatus('Chrono Stream: gestures paused');
+        return;
       }
       
       // ======================================================================
