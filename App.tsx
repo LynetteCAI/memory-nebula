@@ -379,6 +379,16 @@ export default function App() {
     setSelectedMemory(null);
   }, []);
 
+  // v0.4.4: Chrono Stream pinch → open current focus memory
+  const handleChronoPinchOpen = useCallback(() => {
+    if (mode !== TreeMode.CHRONO_STREAM) return;
+    if (selectedMemory !== null) return;
+    const memory = chronoMemories[focusIndex];
+    if (!memory) return;
+    setSelectedMemory(memory);
+    setModalOpenedAt(performance.now());
+  }, [mode, selectedMemory, chronoMemories, focusIndex]);
+
   // v0.3.1-lite: Pinch hold → open current candidate directly
   const handlePinchConfirm = useCallback(() => {
     const memory = candidateMemoryRef.current;
@@ -451,7 +461,7 @@ export default function App() {
         </div>
       )}
       
-      {/* Gesture Control Module — v0.3.2: modal close gesture */}
+      {/* Gesture Control Module — v0.3.2: modal close gesture, v0.4.4: chrono gestures */}
       <GestureController
         currentMode={mode}
         onModeChange={setMode}
@@ -469,7 +479,12 @@ export default function App() {
         modalOpen={selectedMemory !== null}
         modalOpenedAt={modalOpenedAt}
         onModalCloseGesture={handleModalCloseGesture}
-        disableGestureActions={isChronoMode}
+        // v0.4.4: Chrono Stream dedicated gestures
+        chronoGestureEnabled={isChronoMode && selectedMemory === null}
+        hasChronoFocusMemory={isChronoMode && chronoMemories.length > 0 && !!chronoMemories[focusIndex]}
+        onChronoSwipeLeft={goPrevMemory}
+        onChronoSwipeRight={goNextMemory}
+        onChronoPinchOpen={handleChronoPinchOpen}
       />
       
       {/* v0.3: Memory Detail Modal — replaces old two-hand photo overlay */}
@@ -483,7 +498,9 @@ export default function App() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none animate-fade-in">
           <div className="bg-black/40 backdrop-blur-sm border border-[#D4AF37]/20 rounded-full px-4 py-1.5">
             <p className="text-[#D4AF37]/50 font-serif text-xs tracking-wider text-center">
-              握拳保持片刻，收起这段回忆
+              {isChronoMode
+                ? '握拳保持片刻，收起这段回忆'
+                : '握拳保持片刻，收起这段回忆'}
             </p>
           </div>
         </div>
@@ -506,12 +523,12 @@ export default function App() {
         </div>
       )}
 
-      {/* v0.4: Chrono Stream pinch hint */}
+      {/* v0.4.4: Chrono Stream gesture hints */}
       {!selectedMemory && memories.length > 0 && mode === TreeMode.CHRONO_STREAM && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity duration-300">
           <div className="bg-black/50 backdrop-blur-sm border border-[#D4AF37]/20 rounded-full px-5 py-2">
             <p className="text-[#D4AF37]/70 font-serif text-sm tracking-wide text-center">
-              捏合手指 · 打开当前回忆
+              左右挥手切换回忆 · 捏合打开当前照片
             </p>
           </div>
         </div>

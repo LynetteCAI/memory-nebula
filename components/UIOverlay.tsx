@@ -164,7 +164,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
             {/* Hint */}
             <p className="text-[#F5E6BF]/20 font-serif text-[9px] tracking-wider text-center mt-2">
-              时间流模式 · 手势已暂停 · 使用左右键 / 滚轮浏览回忆
+              左右挥手切换回忆 · 捏合打开当前照片 · 左右键 / 滚轮也可浏览
             </p>
           </div>
         </div>

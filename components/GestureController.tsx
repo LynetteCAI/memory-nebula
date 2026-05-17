@@ -56,6 +56,25 @@ const MODAL_OPEN_GRACE_MS = 800;
 /** Grace period after modal closes before fist can trigger mode switch */
 const POST_MODAL_GRACE_MS = 800;
 
+// ---------------------------------------------------------------------------
+// v0.4.4 Chrono Stream Swipe Constants
+// ---------------------------------------------------------------------------
+
+/** Minimum horizontal palm displacement (screen width fraction) to trigger swipe */
+const SWIPE_MIN_DISTANCE = 0.18;
+/** Maximum swipe duration in ms */
+const SWIPE_MAX_DURATION_MS = 700;
+/** Minimum swipe duration in ms (to filter out jitter) */
+const SWIPE_MIN_DURATION_MS = 120;
+/** Maximum vertical drift during swipe (screen height fraction) */
+const SWIPE_MAX_VERTICAL_DRIFT = 0.16;
+/** Cooldown after a swipe before another is allowed */
+const SWIPE_COOLDOWN_MS = 750;
+/** Max age of palm history entries (ms) */
+const SWIPE_HISTORY_MAX_AGE_MS = 1000;
+/** Invert chrono swipe left/right direction if needed */
+const INVERT_CHRONO_SWIPE = false;
+
 type RawGesture = 'open' | 'fist' | 'unknown' | 'none';
 
 interface GestureControllerProps {
@@ -82,8 +101,20 @@ interface GestureControllerProps {
   /** Called when fist hold triggers in modal mode: close the modal */
   onModalCloseGesture?: () => void;
   /** v0.4.1: Completely disable all gesture actions (open/fist/pinch/nav/modal-close).
-   *  Camera preview and debug HUD remain active. */
+   *  Camera preview and debug HUD remain active.
+   *  v0.4.4: Deprecated in favor of chrono-specific props. Kept for backward compat. */
   disableGestureActions?: boolean;
+  // --- v0.4.4 Chrono Stream dedicated gestures ---
+  /** Enable chrono stream swipe+pinch gestures (true when CHRONO_STREAM && !modalOpen) */
+  chronoGestureEnabled?: boolean;
+  /** Whether a chrono focus memory exists to open via pinch */
+  hasChronoFocusMemory?: boolean;
+  /** Called when chrono left swipe triggers: go to previous memory */
+  onChronoSwipeLeft?: () => void;
+  /** Called when chrono right swipe triggers: go to next memory */
+  onChronoSwipeRight?: () => void;
+  /** Called when chrono pinch hold triggers: open current focus memory */
+  onChronoPinchOpen?: () => void;
 }
 
 export const GestureController: React.FC<GestureControllerProps> = ({ 
@@ -100,6 +131,12 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   modalOpenedAt = 0,
   onModalCloseGesture,
   disableGestureActions = false,
+  // v0.4.4 Chrono Stream dedicated gestures
+  chronoGestureEnabled = false,
+  hasChronoFocusMemory = false,
+  onChronoSwipeLeft,
+  onChronoSwipeRight,
+  onChronoPinchOpen,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -122,6 +159,31 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   const prevModalOpenRef = useRef(modalOpen);
   // v0.4.1: Ref for disableGestureActions to keep fresh in detection closure
   const disableActionsRef = useRef(disableGestureActions);
+
+  // -------------------------------------------------------------------------
+  // v0.4.4 Chrono Stream swipe state
+  // -------------------------------------------------------------------------
+  const swipeState = useRef({
+    palmHistory: [] as { x: number; y: number; time: number }[],
+    lastSwipeTriggeredAt: 0,
+  });
+
+  // -------------------------------------------------------------------------
+  // v0.4.4 Chrono Stream pinch state (separate from starfield pinch)
+  // -------------------------------------------------------------------------
+  const chronoPinchState = useRef({
+    pinching: false,
+    pinchSince: 0,
+    lastPinchTriggeredAt: 0,
+    pinchTriggered: false,
+  });
+
+  // v0.4.4: Refs for chrono-specific props to keep fresh in detection closure
+  const chronoGestureEnabledRef = useRef(chronoGestureEnabled);
+  const hasChronoFocusMemoryRef = useRef(hasChronoFocusMemory);
+  const onChronoSwipeLeftRef = useRef(onChronoSwipeLeft);
+  const onChronoSwipeRightRef = useRef(onChronoSwipeRight);
+  const onChronoPinchOpenRef = useRef(onChronoPinchOpen);
   
   // -------------------------------------------------------------------------
   // v0.2.1 Stable-hold trigger state (replaces old frame-count debounce)
@@ -202,6 +264,12 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   useEffect(() => { onModalCloseGestureRef.current = onModalCloseGesture; }, [onModalCloseGesture]);
   // v0.4.1: sync disableGestureActions ref
   useEffect(() => { disableActionsRef.current = disableGestureActions; }, [disableGestureActions]);
+  // v0.4.4: sync chrono gesture refs
+  useEffect(() => { chronoGestureEnabledRef.current = chronoGestureEnabled; }, [chronoGestureEnabled]);
+  useEffect(() => { hasChronoFocusMemoryRef.current = hasChronoFocusMemory; }, [hasChronoFocusMemory]);
+  useEffect(() => { onChronoSwipeLeftRef.current = onChronoSwipeLeft; }, [onChronoSwipeLeft]);
+  useEffect(() => { onChronoSwipeRightRef.current = onChronoSwipeRight; }, [onChronoSwipeRight]);
+  useEffect(() => { onChronoPinchOpenRef.current = onChronoPinchOpen; }, [onChronoPinchOpen]);
 
   useEffect(() => {
     let handLandmarker: HandLandmarker | null = null;
@@ -408,13 +476,236 @@ export const GestureController: React.FC<GestureControllerProps> = ({
         onHandPosition(0.5, 0.5, false);
       }
 
-      // v0.4.1: If gesture actions are globally disabled (e.g. Chrono Stream),
-      // skip ALL open/fist/pinch/modal-close processing. Camera preview still active.
-      if (disableActionsRef.current) {
+      // v0.4.1: Backward compat — if disableGestureActions is explicitly set
+      // AND we're not in chrono mode, bail out completely
+      // v0.4.4: In chrono mode, we use the chrono-specific branch below instead
+      if (disableActionsRef.current && currentModeRef.current !== TreeMode.CHRONO_STREAM) {
         setGestureStatus('Chrono Stream: gestures paused');
         return;
       }
-      
+
+      // ======================================================================
+      // v0.4.4: CHRONO_STREAM DEDICATED GESTURES
+      // ======================================================================
+      if (currentModeRef.current === TreeMode.CHRONO_STREAM) {
+        const chronoNow = performance.now();
+
+        // ----------------------------------------------------------------
+        // Layer 1: CHRONO_STREAM + modal open → only fist close
+        // ----------------------------------------------------------------
+        if (modalOpenRef.current) {
+          const mcs = modalCloseState.current;
+          let mCloseBlockReason = 'none';
+          let shouldAttemptClose = false;
+
+          // Compute fist inline
+          const ftCheck = [8, 12, 16, 20], fbCheck = [5, 9, 13, 17];
+          let extF = 0;
+          for (let i = 0; i < 4; i++) {
+            const dt = Math.hypot(landmarks[ftCheck[i]].x - wrist.x, landmarks[ftCheck[i]].y - wrist.y);
+            const db = Math.hypot(landmarks[fbCheck[i]].x - wrist.x, landmarks[fbCheck[i]].y - wrist.y);
+            if (dt > db * 1.5) extF++;
+          }
+          const dtThumb = Math.hypot(landmarks[4].x - wrist.x, landmarks[4].y - wrist.y);
+          const dbThumb = Math.hypot(landmarks[2].x - wrist.x, landmarks[2].y - wrist.y);
+          if (dtThumb > dbThumb * 1.2) extF++;
+          const isFistNow = extF <= 1;
+
+          // Check gate conditions
+          const graceElapsed = (chronoNow - modalOpenedAtRef.current) >= MODAL_OPEN_GRACE_MS;
+          if (!onModalCloseGestureRef.current) mCloseBlockReason = 'callback missing';
+          else if (!graceElapsed) mCloseBlockReason = 'grace period';
+          else shouldAttemptClose = true;
+
+          if (isFistNow && shouldAttemptClose) {
+            if (mcs.fistSince === 0) mcs.fistSince = chronoNow;
+            mcs.closeTriggered = false;
+            const fistDur = chronoNow - mcs.fistSince;
+            const inCd = (chronoNow - mcs.lastCloseTriggeredAt) < MODAL_CLOSE_COOLDOWN_MS;
+            if (fistDur >= MODAL_CLOSE_FIST_HOLD_MS && !inCd && !mcs.closeTriggered) {
+              mcs.closeTriggered = true;
+              mcs.lastCloseTriggeredAt = chronoNow;
+              onModalCloseGestureRef.current();
+            }
+          } else if (isFistNow && !shouldAttemptClose) {
+            if (mcs.fistSince === 0) mcs.fistSince = chronoNow;
+          } else {
+            if (mcs.fistSince !== 0) { mcs.fistSince = 0; mcs.closeTriggered = false; }
+          }
+
+          // Chrono modal gesture status + debug HUD
+          if (DEBUG_GESTURES) {
+            const mGraceR = Math.max(0, Math.ceil((MODAL_OPEN_GRACE_MS - (chronoNow - modalOpenedAtRef.current)) / 100) / 10);
+            const mCdR = Math.max(0, Math.ceil((MODAL_CLOSE_COOLDOWN_MS - (chronoNow - mcs.lastCloseTriggeredAt)) / 100) / 10);
+            setDebugInfo({
+              candidate: false,
+              pinchRatio: 0,
+              pinchDetected: false,
+              pinchHoldMs: 0,
+              pinchCooldownRemaining: 0,
+              lastBlockReason: 'none',
+              modalOpen: true,
+              modalCloseFist: isFistNow,
+              modalCloseHoldMs: isFistNow ? Math.round(chronoNow - mcs.fistSince) : 0,
+              modalGraceRemaining: mGraceR,
+              modalCloseCdRemaining: mCdR,
+              modalCloseBlockReason: isFistNow && !shouldAttemptClose ? mCloseBlockReason : 'none',
+            });
+          }
+
+          if (isFistNow) {
+            const fistDur = chronoNow - mcs.fistSince;
+            const graceElapsedNow = (chronoNow - modalOpenedAtRef.current) >= MODAL_OPEN_GRACE_MS;
+            if (!graceElapsedNow) {
+              setGestureStatus(`Chrono Modal grace ${Math.round((MODAL_OPEN_GRACE_MS-(chronoNow-modalOpenedAtRef.current))/100)/10}s...`);
+            } else {
+              setGestureStatus(`Chrono Fist to close ${Math.round(fistDur)}ms / ${MODAL_CLOSE_FIST_HOLD_MS}ms`);
+            }
+          } else {
+            setGestureStatus('Chrono: Fist hold to close modal');
+          }
+          return; // CHRONO modal: no swipe, no pinch, no mode switch
+        }
+
+        // ----------------------------------------------------------------
+        // Layer 2: CHRONO_STREAM + no modal → chrono pinch + swipe
+        // ----------------------------------------------------------------
+        // Reset modal close state when not in modal
+        const mcs = modalCloseState.current;
+        if (mcs.fistSince !== 0) { mcs.fistSince = 0; mcs.closeTriggered = false; }
+
+        // --- Chromo Pinch Detection ---
+        const checkPinch = (h: any[]): number => {
+          const w = h[0], tTip = h[4], iTip = h[8], mMcp = h[9];
+          const pd = Math.hypot(tTip.x - iTip.x, tTip.y - iTip.y);
+          const palm = Math.hypot(w.x - mMcp.x, w.y - mMcp.y);
+          return palm === 0 ? 999 : pd / palm;
+        };
+        const areNonPinchFingersExtended = (h: any[]): boolean => {
+          const w = h[0];
+          const checks: [number, number][] = [[12, 9], [16, 13], [20, 17]];
+          let extended = 0;
+          for (const [tipIdx, baseIdx] of checks) {
+            const dt = Math.hypot(h[tipIdx].x - w.x, h[tipIdx].y - w.y);
+            const db = Math.hypot(h[baseIdx].x - w.x, h[baseIdx].y - w.y);
+            if (dt > db * 1.3) extended++;
+          }
+          return extended >= 2;
+        };
+        let bestRatio = 999;
+        let pinchHand: any[] | null = null;
+        const hands = (allLandmarks && allLandmarks.length > 0) ? allLandmarks : [landmarks];
+        for (const h of hands) {
+          const r = checkPinch(h);
+          if (r < bestRatio) { bestRatio = r; pinchHand = h; }
+        }
+        const rawPinchChrono = bestRatio < PINCH_RATIO_THRESHOLD;
+        const chronoPinchDetected = rawPinchChrono && pinchHand !== null && areNonPinchFingersExtended(pinchHand);
+
+        const cps = chronoPinchState.current;
+        let chronoBlockReason = 'none';
+        let shouldChronoPinch = false;
+        if (!chronoGestureEnabledRef.current) chronoBlockReason = 'chrono gestures disabled';
+        else if (!hasChronoFocusMemoryRef.current) chronoBlockReason = 'no chrono focus memory';
+        else if (!onChronoPinchOpenRef.current) chronoBlockReason = 'no callback';
+        else shouldChronoPinch = true;
+
+        if (chronoPinchDetected && shouldChronoPinch) {
+          if (!cps.pinching) { cps.pinching = true; cps.pinchSince = chronoNow; cps.pinchTriggered = false; }
+          const dur = chronoNow - cps.pinchSince;
+          if (dur >= PINCH_HOLD_MS && !cps.pinchTriggered && (chronoNow - cps.lastPinchTriggeredAt) >= PINCH_COOLDOWN_MS) {
+            cps.pinchTriggered = true;
+            cps.lastPinchTriggeredAt = chronoNow;
+            onChronoPinchOpenRef.current();
+          }
+        } else if (chronoPinchDetected && !shouldChronoPinch) {
+          if (!cps.pinching) cps.pinching = true;
+        } else {
+          if (cps.pinching) { cps.pinching = false; cps.pinchSince = 0; cps.pinchTriggered = false; }
+        }
+
+        // --- Chrono Swipe Detection ---
+        const ss = swipeState.current;
+        const nowMs = chronoNow;
+        // Prune old history entries
+        ss.palmHistory = ss.palmHistory.filter(e => nowMs - e.time < SWIPE_HISTORY_MAX_AGE_MS);
+        // Add current palm center
+        ss.palmHistory.push({ x: palmCenterX, y: palmCenterY, time: nowMs });
+
+        let swipeDirection: 'none' | 'left' | 'right' = 'none';
+        let swipeDetected = false;
+
+        if (chronoGestureEnabledRef.current && ss.palmHistory.length >= 2) {
+          const first = ss.palmHistory[0];
+          const last = ss.palmHistory[ss.palmHistory.length - 1];
+          const dx = last.x - first.x;
+          const dy = last.y - first.y;
+          const duration = last.time - first.time;
+          const absDx = Math.abs(dx);
+          const absDy = Math.abs(dy);
+          const inCooldown = (nowMs - ss.lastSwipeTriggeredAt) < SWIPE_COOLDOWN_MS;
+
+          if (!inCooldown && absDx >= SWIPE_MIN_DISTANCE && duration >= SWIPE_MIN_DURATION_MS && duration <= SWIPE_MAX_DURATION_MS && absDy < SWIPE_MAX_VERTICAL_DRIFT) {
+            if (dx < 0) {
+              swipeDirection = INVERT_CHRONO_SWIPE ? 'right' : 'left';
+            } else {
+              swipeDirection = INVERT_CHRONO_SWIPE ? 'left' : 'right';
+            }
+            swipeDetected = true;
+
+            if (swipeDirection === 'left' && onChronoSwipeLeftRef.current) {
+              onChronoSwipeLeftRef.current();
+            } else if (swipeDirection === 'right' && onChronoSwipeRightRef.current) {
+              onChronoSwipeRightRef.current();
+            }
+            ss.lastSwipeTriggeredAt = nowMs;
+            ss.palmHistory = []; // Reset history after swipe
+          }
+        }
+
+        // Debug HUD update for chrono mode
+        if (DEBUG_GESTURES && chronoNow - lastDebugRender.current > DEBUG_HUD_INTERVAL_MS) {
+          lastDebugRender.current = chronoNow;
+          const cdR = Math.max(0, Math.ceil((PINCH_COOLDOWN_MS - (chronoNow - cps.lastPinchTriggeredAt)) / 100) / 10);
+          const swipeCdR = Math.max(0, Math.ceil((SWIPE_COOLDOWN_MS - (chronoNow - ss.lastSwipeTriggeredAt)) / 100) / 10);
+          setDebugInfo({
+            candidate: hasChronoFocusMemoryRef.current,
+            pinchRatio: Math.round(bestRatio * 100) / 100,
+            pinchDetected: chronoPinchDetected,
+            pinchHoldMs: chronoPinchDetected ? Math.round(chronoNow - cps.pinchSince) : 0,
+            pinchCooldownRemaining: cdR,
+            lastBlockReason: chronoPinchDetected && !shouldChronoPinch ? chronoBlockReason : 'none',
+            modalOpen: false,
+            modalCloseFist: false,
+            modalCloseHoldMs: 0,
+            modalGraceRemaining: 0,
+            modalCloseCdRemaining: swipeCdR,
+            modalCloseBlockReason: 'none',
+          });
+        }
+
+        // Chrono gesture status text
+        if (cps.pinching) {
+          setGestureStatus(`Chrono Pinch ${Math.round(chronoNow - cps.pinchSince)}ms / ${PINCH_HOLD_MS}ms`);
+        } else if (swipeDetected) {
+          setGestureStatus(`Chrono Swipe: ${swipeDirection}`);
+        } else {
+          setGestureStatus('Chrono: Swipe ↔ · Pinch to open');
+        }
+        return; // CHRONO branch done
+      }
+
+      // ======================================================================
+      // BELOW: Original starfield gesture logic (non-CHRONO_STREAM mode only)
+      // ======================================================================
+
+      // v0.4.1: If disableGestureActions is set and we somehow got here (non-chrono),
+      // bail out (backward compat safety net)
+      if (disableActionsRef.current) {
+        setGestureStatus('Gestures paused');
+        return;
+      }
+
       // ======================================================================
       // v0.3.1-lite: PINCH DETECTION — runs FIRST, independent of open/fist
       // ======================================================================
@@ -747,23 +1038,25 @@ export const GestureController: React.FC<GestureControllerProps> = ({
       {DEBUG_GESTURES && (
         <div className="mt-2 w-[18.75vw] pointer-events-auto">
           <div className="bg-black/70 backdrop-blur-sm border border-[#D4AF37]/20 rounded p-2 text-right">
-            <p className="text-[10px] text-[#D4AF37]/60 font-mono leading-tight">
-              modal: {debugInfo.modalOpen ? 'YES' : 'no'}
-              {debugInfo.modalOpen && (
-                <>
-                  {' | '}fist: {debugInfo.modalCloseFist ? 'YES' : 'no'}
-                  {' | '}hold: {debugInfo.modalCloseHoldMs}/{MODAL_CLOSE_FIST_HOLD_MS}ms
-                </>
-              )}
+            {/* v0.4.4: Chrono mode indicator */}
+            <p className="text-[10px] text-[#D4AF37]/50 font-mono leading-tight">
+              mode: {currentMode === TreeMode.CHRONO_STREAM ? 'CHRONO' : currentMode === TreeMode.CHAOS ? 'CHAOS' : 'FORMED'}
             </p>
             {debugInfo.modalOpen && (
-              <p className="text-[10px] text-[#D4AF37]/40 font-mono leading-tight">
-                grace: {debugInfo.modalGraceRemaining}s
-                {' | '}cd: {debugInfo.modalCloseCdRemaining}s
-                {debugInfo.modalCloseBlockReason !== 'none' && (
-                  <span className="text-red-400/60">{' | '}BLOCK: {debugInfo.modalCloseBlockReason}</span>
-                )}
-              </p>
+              <>
+                <p className="text-[10px] text-[#D4AF37]/60 font-mono leading-tight">
+                  modal: YES
+                  {' | '}fist: {debugInfo.modalCloseFist ? 'YES' : 'no'}
+                  {' | '}hold: {debugInfo.modalCloseHoldMs}/{MODAL_CLOSE_FIST_HOLD_MS}ms
+                </p>
+                <p className="text-[10px] text-[#D4AF37]/40 font-mono leading-tight">
+                  grace: {debugInfo.modalGraceRemaining}s
+                  {' | '}cd: {debugInfo.modalCloseCdRemaining}s
+                  {debugInfo.modalCloseBlockReason !== 'none' && (
+                    <span className="text-red-400/60">{' | '}BLOCK: {debugInfo.modalCloseBlockReason}</span>
+                  )}
+                </p>
+              </>
             )}
             {!debugInfo.modalOpen && (
               <>

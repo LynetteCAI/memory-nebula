@@ -4,7 +4,7 @@
 
 ## 📝 版本
 
-**v0.4.3**：Dust Lighting Polish — 星际尘埃发光策略优化，三层尘埃体系（当前）。
+**v0.4.4**：Chrono Stream Dedicated Gestures — 时间流专属手势（当前）。
 
 ## 🛠️ 快速开始
 
@@ -107,8 +107,7 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - **v0.4.1** ✅ Chrono Stream 手势隔离与背景退流
 - **v0.4.2** ✅ 恒星椭圆轨道系统升级
 - **v0.4.3** ✅ 星际尘埃发光策略优化
-- **v0.4.4** ⏳ 时间流视觉增强：日期刻度、星尘拉伸
-- **v0.4.3** ⏳ 时间流手势切换：左右挥手上一张/下一张
+- **v0.4.4** ✅ 时间流专属手势：左右挥手、捏合打开、握拳关闭
 - **v0.5** ⏳ 增加推手势进入时间隧道
 
 ## ✨ 功能
@@ -126,9 +125,61 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - 多恒星系统（Stellar Systems）
 - 拍立得照片可点击查看详情（v0.3）
 - 手势照片选择（v0.3.1）
+- 时间流专属手势：左右挥手、捏合、握拳关闭（v0.4.4）
 - 回忆管理器：上传、编辑、删除、批量操作（v0.3.4）
 - IndexedDB 本地持久化存储（v0.3.4）
 - JSON 导入/导出备份（v0.3.4）
+
+---
+
+## ✋ v0.4.4 Chrono Stream Dedicated Gestures
+
+v0.4.4 为 Chrono Stream 增加独立的时间流手势。进入时间流后，星云阶段的手势仍然暂停，不会控制视角、不会展开或收拢星云。时间流中只启用专属手势：左右挥手切换上一段/下一段回忆，捏合打开当前焦点照片；照片详情打开后，只允许握拳保持关闭详情。星云模式和时间流模式拥有各自独立的手势语法，互不干扰。
+
+### 时间流专属手势
+
+| 手势 | 时间流（无弹窗） | 时间流（弹窗打开） | 星云模式 |
+|------|:---:|:---:|:---:|
+| 左右挥手 | ✅ 切换回忆 | ❌ | ❌ |
+| 捏合 | ✅ 打开当前照片 | ❌ | ✅ 打开候选照片 |
+| 握拳 | ❌ | ✅ 关闭弹窗 | ✅ 收拢核心 |
+| 张手 | ❌ | ❌ | ✅ 展开星云 |
+| 手掌移动 | ❌ | ❌ | ✅ 控制视角 |
+
+### 左右划手势检测
+
+- **检测方式**：追踪手掌中心（wrist + indexMCP + pinkyMCP 平均位置）在时间窗口内的水平位移
+- **阈值**：水平位移 ≥ 屏幕宽度的 18%，持续时间 120–700ms，垂直漂移 < 屏幕高度的 16%
+- **方向**：手从右向左 → 上一段回忆；手从左向右 → 下一段回忆
+- **冷却**：750ms 内只触发一次
+- **约束**：只在 CHRONO_STREAM 且无弹窗时有效；到第一张/最后一张不会越界
+
+### 捏合打开当前照片
+
+- Chrono Stream 中捏合打开 `chronoMemories[focusIndex]`（不依赖候选照片 `candidateMemory`）
+- 与星云模式捏合同样的 hold 时长（300ms）和冷却（1000ms）
+- 弹窗打开后暂停捏合
+
+### 握拳关闭照片详情
+
+- Chrono Stream 的 MemoryModal 打开后，握拳保持 600ms 即可关闭
+- 关闭后停在 CHRONO_STREAM，不会触发 FORMED 模式切换
+- 打开后 800ms grace period 仍然生效
+
+### 手势优先级
+
+1. CHRONO_STREAM + 弹窗打开 → 只检测握拳关闭
+2. CHRONO_STREAM + 无弹窗 → 先检测捏合（防误触 swipe），再检测左右划
+3. 非 CHRONO_STREAM → 原有星云手势不变
+
+### 技术实现
+
+- **`GestureController`**：在 `detectGesture` 中按 `currentMode` 分层处理。CHRONO_STREAM 分支提前 return，不进入星云手势逻辑
+- **新增 props**：`chronoGestureEnabled`、`hasChronoFocusMemory`、`onChronoSwipeLeft`、`onChronoSwipeRight`、`onChronoPinchOpen`
+- **Swipe state**：`swipeState.palmHistory[]` 追踪手掌轨迹，触发后清空重置
+- **Chrono pinch state**：独立的 `chronoPinchState`，与星云 `pinchState` 不冲突
+- **`App.tsx`**：新增 `handleChronoPinchOpen`，移除 `disableGestureActions`
+- **GestureController 不改变**：鼠标/键盘/滚轮时间流操作、星云模式原有手势
 
 ---
 
@@ -209,13 +260,14 @@ v0.4.1 将 Chrono Stream 时间流从星云手势系统中完整隔离，使其�
 
 ### 手势隔离
 
-进入 Chrono Stream 后，所有星云手势完全暂停：
+进入 Chrono Stream 后，星云手势完全暂停，但时间流专属手势（v0.4.4）可用：
 
 - ❌ 手势移动不会改变相机视角
 - ❌ 张手不会返回星云（Memory Constellation）
 - ❌ 握拳不会收拢核心（Memory Core）
-- ❌ 捏合不会打开照片详情
-- ❌ 照片详情中握拳不会关闭弹窗
+- ✅ 左右挥手切换上一段/下一段回忆
+- ✅ 捏合打开当前焦点照片
+- ✅ 握拳关闭照片详情（弹窗打开时）
 - ✅ 摄像头预览和 Debug HUD 仍然活跃
 
 退出 Chrono Stream 后，所有手势立即完全恢复。
@@ -244,16 +296,18 @@ Foliage（星尘）和 Ornaments（恒星系统/行星）在 Chrono Stream 中�
 | HUD 按钮 | ✅ | ❌ |
 | Esc 关闭弹窗 | ✅ | ✅ |
 | Esc 返回星云 | ✅ | ❌ |
+| 手势左右挥手 | ✅ (v0.4.4) | ❌ |
+| 手势捏合打开 | ✅ (v0.4.4) | ✅ |
+| 手势握拳关闭弹窗 | ✅ (v0.4.4) | ✅ |
 | 手势导航 | ❌ | ✅ |
 | 张手展开 | ❌ | ✅ |
 | 握拳收拢 | ❌ | ✅ |
-| 捏合打开 | ❌ | ✅ |
-| Modal 握拳关闭 | ❌ | ✅ |
 
 ### 技术实现
 
-- **`GestureController.disableGestureActions`**：新增 prop，为 `true` 时跳过所有 open/fist/pinch/modal-close 处理
-- **`App.tsx`**：`isChronoMode` 统一控制 `gestureNavigationEnabled`、`gesturePhotoSelectionEnabled`、`disableGestureActions`
+- **`GestureController.disableGestureActions`**：新增 prop，为 `true` 时跳过 open/fist/pinch/modal-close 处理（v0.4.4 中已被 chrono-specific props 增强）
+- **`App.tsx`**：`isChronoMode` 统一控制 `gestureNavigationEnabled`、`gesturePhotoSelectionEnabled`
+- **v0.4.4 增强**：新增 `chronoGestureEnabled`、`hasChronoFocusMemory`、`onChronoSwipeLeft/Right`、`onChronoPinchOpen` props，按模式分层处理手势
 - **`Experience.tsx`**：`OrbitControls enabled={!isChrono}`，进入 Chrono 时 `useEffect` 初始化相机
 - **背景组**：Foliage + Ornaments 包裹在独立 group 中，Chrono Stream 时 `position=[0,0,-12] scale=1.35`
 
@@ -270,7 +324,8 @@ v0.4 新增时间流模式（Chrono Stream）。Memory Constellation 强调空�
    - 键盘：← 或 A（上一段）、→ 或 D（下一段）
    - 按钮：点击底部 HUD 上的"上一段" / "下一段"
    - 滚轮：向上滚动（上一段）、向下滚动（下一段），有 400ms 节流
-3. **打开详情**：点击当前焦点照片或捏合手指，打开 MemoryModal 查看完整回忆信息。
+   - 手势：左右挥手切换（v0.4.4）
+3. **打开详情**：点击当前焦点照片或捏合手指（v0.4.4），打开 MemoryModal 查看完整回忆信息。握拳保持可关闭详情（v0.4.4）。
 4. **返回星云**：按 Esc 或点击"回到星云"按钮，返回 Memory Constellation 展开态。
 5. **HUD 信息**：底部显示当前序号、照片标题、日期和地点。
 
