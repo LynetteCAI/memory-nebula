@@ -4,7 +4,7 @@
 
 ## 📝 版本
 
-**v0.3.2**：Gesture Close Memory Modal — 握拳保持关闭照片详情。
+**v0.3.3**：Constellation Photo Facing Polish — 展开态照片朝向相机。
 
 ## 🛠️ 快速开始
 
@@ -100,8 +100,9 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - **v0.2.5** ✅ Photo Volume Distribution：照片体积分布优化
 - **v0.3** ✅ 拍立得照片可点击，展示时间和文字
 - **v0.3.1** ✅ 中心候选 + 捏合打开照片
-- **v0.3.2** ✅ 握拳保持关闭照片详情（当前）
-- **v0.3.3** (未来) 双手锁定 + pinch 完整流程
+- **v0.3.2** ✅ 握拳保持关闭照片详情
+- **v0.3.3** ✅ 展开态照片朝向相机（当前）
+- **v0.3.x** (未来) 双手锁定 + pinch 完整流程
 - **v0.4** 新增时间隧道模式，先用按钮进入
 - **v0.5** 增加推手势进入时间隧道
 - **v0.6** 加纪念日终章、信件、音乐、分享
@@ -199,6 +200,33 @@ selectedMemory（MemoryModal 打开，导航暂停）
 **Pinch 检测：** `distance(thumb[4], index[8]) / distance(wrist[0], middleMCP[9]) < 0.5`；保持 300ms 触发；1000ms 冷却。
 
 **Debug HUD：** 摄像头预览下方显示 candidate yes/no、pinchRatio、pinchDetected、hold time、cooldown remaining、block reason。设置 `DEBUG_GESTURES = false` 可隐藏。
+
+---
+
+## 🧭 v0.3.3 Constellation Photo Facing Polish
+
+v0.3.3 优化了 Memory Constellation 展开态中的照片朝向。
+
+**问题：** 旧逻辑中 CHAOS 展开态的照片仍然使用 `lookAt(0, 0, 0)` 朝向星云中心，导致用户从侧面或后方观察时，大量照片背板朝向用户，无法看到预览图。
+
+**解决：** CHAOS 展开态下，每张照片使用 `lookAt(camera.position)` 柔和地朝向当前 3D 相机位置。FORMED 聚合态保持原有朝向逻辑不变。
+
+**实现细节：**
+
+```
+CHAOS:
+  dummy.lookAt(state.camera.position)
+  dummy.rotateY(Math.PI)  // 翻转以匹配拍立得正面方向
+  quaternion.slerp(target, 1 - exp(-delta * 4.0))  // 平滑过渡
+
+FORMED:
+  dummy.lookAt(0, 0, 0)   // 保持原逻辑，环绕星云核心
+  dummy.rotateY(Math.PI)
+```
+
+- Wobble 幅度从 0.03 降至 0.02，避免相机跟随模式下摇摆过大
+- 使用指数衰减 slerp（`1 - exp(-delta * 4.0)`）替代线性插值（`delta * 3`），过渡更自然
+- 不影响照片位置、scale、候选选择、pinch 或鼠标点击
 
 ---
 

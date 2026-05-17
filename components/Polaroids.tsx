@@ -135,13 +135,17 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
         groupRef.current.rotation.z = currentRot.z + swayAngle * 0.04; 
         groupRef.current.rotation.x = currentRot.x + tiltAngle * 0.04;
     } else {
+        // v0.3.3: CHAOS / Memory Constellation — face towards camera (no flip)
         const dummy = new THREE.Object3D();
         dummy.position.copy(groupRef.current.position);
-        dummy.lookAt(0, 0, 0);
-        dummy.rotateY(Math.PI);
-        groupRef.current.quaternion.slerp(dummy.quaternion, delta * 3);
-        const wobbleX = Math.sin(time * 1.5 + swayOffset) * 0.03;
-        const wobbleZ = Math.cos(time * 1.2 + swayOffset) * 0.03;
+        dummy.lookAt(state.camera.position);
+        groupRef.current.quaternion.slerp(
+          dummy.quaternion,
+          1 - Math.exp(-delta * 4.0)
+        );
+        // Gentle wobble for natural feel — relative to camera-facing basis
+        const wobbleX = Math.sin(time * 1.5 + swayOffset) * 0.02;
+        const wobbleZ = Math.cos(time * 1.2 + swayOffset) * 0.02;
         const currentRot = new THREE.Euler().setFromQuaternion(groupRef.current.quaternion);
         groupRef.current.rotation.x = currentRot.x + wobbleX;
         groupRef.current.rotation.z = currentRot.z + wobbleZ;
