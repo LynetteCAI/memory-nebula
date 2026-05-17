@@ -129,7 +129,7 @@ export const Experience: React.FC<ExperienceProps> = ({
       <pointLight position={[5, -2, 5]} intensity={0.5} color="#88CCEE" /> {/* Cyan rim */}
 
       <group position={[0, 0, 0]}>
-        <Foliage mode={mode} count={12000} />
+        <Foliage mode={mode} count={6000} />
         <Ornaments mode={mode} count={600} />
         <Polaroids
           mode={mode}

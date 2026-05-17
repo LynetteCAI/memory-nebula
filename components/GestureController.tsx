@@ -43,6 +43,19 @@ const DEBUG_GESTURES = true;
 /** Min interval between debug HUD re-renders (ms) */
 const DEBUG_HUD_INTERVAL_MS = 100;
 
+// ---------------------------------------------------------------------------
+// v0.3.2 Modal Close Gesture Constants
+// ---------------------------------------------------------------------------
+
+/** How long fist must be held to close the modal */
+const MODAL_CLOSE_FIST_HOLD_MS = 600;
+/** Cooldown after modal close before another close is allowed */
+const MODAL_CLOSE_COOLDOWN_MS = 1000;
+/** Grace period after modal opens before close gesture is accepted */
+const MODAL_OPEN_GRACE_MS = 800;
+/** Grace period after modal closes before fist can trigger mode switch */
+const POST_MODAL_GRACE_MS = 800;
+
 type RawGesture = 'open' | 'fist' | 'unknown' | 'none';
 
 interface GestureControllerProps {
@@ -61,6 +74,13 @@ interface GestureControllerProps {
   onLockPhotoGesture?: () => void;
   /** Called when pinch hold triggers: open current candidate photo */
   onPinchConfirm?: () => void;
+  // --- v0.3.2 Modal close gesture ---
+  /** Whether the MemoryModal is currently open */
+  modalOpen?: boolean;
+  /** Timestamp (performance.now()) when modal was opened */
+  modalOpenedAt?: number;
+  /** Called when fist hold triggers in modal mode: close the modal */
+  onModalCloseGesture?: () => void;
 }
 
 export const GestureController: React.FC<GestureControllerProps> = ({ 
@@ -73,6 +93,9 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   hasCandidatePhoto = false,
   onLockPhotoGesture,
   onPinchConfirm,
+  modalOpen = false,
+  modalOpenedAt = 0,
+  onModalCloseGesture,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -86,6 +109,13 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   const hasCandidatePhotoRef = useRef(hasCandidatePhoto);
   const gestureNavigationEnabledRef = useRef(gestureNavigationEnabled);
   const gesturePhotoSelectionEnabledRef = useRef(gesturePhotoSelectionEnabled);
+  // v0.3.2: Modal close gesture refs
+  const modalOpenRef = useRef(modalOpen);
+  const modalOpenedAtRef = useRef(modalOpenedAt);
+  const onModalCloseGestureRef = useRef(onModalCloseGesture);
+  // v0.3.2: Post-modal grace to prevent accidental fist trigger after closing
+  const modalClosedAtRef = useRef(0);
+  const prevModalOpenRef = useRef(modalOpen);
   
   // -------------------------------------------------------------------------
   // v0.2.1 Stable-hold trigger state (replaces old frame-count debounce)
@@ -119,6 +149,15 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   });
 
   // -------------------------------------------------------------------------
+  // v0.3.2 Modal close fist state
+  // -------------------------------------------------------------------------
+  const modalCloseState = useRef({
+    fistSince: 0,               // when fist started in modal mode
+    lastCloseTriggeredAt: 0,    // last modal close fire time (cooldown)
+    closeTriggered: false,      // has this fist hold already fired close?
+  });
+
+  // -------------------------------------------------------------------------
   // v0.3.1 Debug HUD state (throttled at ~10fps)
   // -------------------------------------------------------------------------
   const [debugInfo, setDebugInfo] = useState({
@@ -128,6 +167,13 @@ export const GestureController: React.FC<GestureControllerProps> = ({
     pinchHoldMs: 0,
     pinchCooldownRemaining: 0,
     lastBlockReason: 'none' as string,
+    // v0.3.2 modal close debug
+    modalOpen: false,
+    modalCloseFist: false,
+    modalCloseHoldMs: 0,
+    modalGraceRemaining: 0,
+    modalCloseCdRemaining: 0,
+    modalCloseBlockReason: 'none' as string,
   });
   const lastDebugRender = useRef(0);
 
@@ -137,6 +183,17 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   useEffect(() => { hasCandidatePhotoRef.current = hasCandidatePhoto; }, [hasCandidatePhoto]);
   useEffect(() => { gestureNavigationEnabledRef.current = gestureNavigationEnabled; }, [gestureNavigationEnabled]);
   useEffect(() => { gesturePhotoSelectionEnabledRef.current = gesturePhotoSelectionEnabled; }, [gesturePhotoSelectionEnabled]);
+  // v0.3.2: sync modal close gesture refs + detect close transition for post-modal grace
+  useEffect(() => {
+    modalOpenRef.current = modalOpen;
+    // Detect modal close transition (true → false) and record timestamp
+    if (prevModalOpenRef.current && !modalOpen) {
+      modalClosedAtRef.current = performance.now();
+    }
+    prevModalOpenRef.current = modalOpen;
+  }, [modalOpen]);
+  useEffect(() => { modalOpenedAtRef.current = modalOpenedAt; }, [modalOpenedAt]);
+  useEffect(() => { onModalCloseGestureRef.current = onModalCloseGesture; }, [onModalCloseGesture]);
 
   useEffect(() => {
     let handLandmarker: HandLandmarker | null = null;
@@ -397,9 +454,97 @@ export const GestureController: React.FC<GestureControllerProps> = ({
       if (DEBUG_GESTURES && now - lastDebugRender.current > DEBUG_HUD_INTERVAL_MS) {
         lastDebugRender.current = now;
         const cdR = Math.max(0, Math.ceil((PINCH_COOLDOWN_MS - (now - ps.lastPinchTriggeredAt)) / 100) / 10);
-        setDebugInfo({ candidate: hasCandidatePhotoRef.current, pinchRatio: Math.round(bestRatio*100)/100,
-          pinchDetected: anyPinch, pinchHoldMs: anyPinch?Math.round(now-ps.pinchSince):0,
-          pinchCooldownRemaining: cdR, lastBlockReason: anyPinch&&!shouldPinch?blockReason:'none' });
+        setDebugInfo(prev => ({
+          ...prev,
+          candidate: hasCandidatePhotoRef.current,
+          pinchRatio: Math.round(bestRatio*100)/100,
+          pinchDetected: anyPinch,
+          pinchHoldMs: anyPinch?Math.round(now-ps.pinchSince):0,
+          pinchCooldownRemaining: cdR,
+          lastBlockReason: anyPinch&&!shouldPinch?blockReason:'none',
+          modalOpen: false,
+          modalCloseFist: false,
+          modalCloseHoldMs: 0,
+          modalGraceRemaining: 0,
+          modalCloseCdRemaining: 0,
+          modalCloseBlockReason: 'none',
+        }));
+      }
+
+      // ======================================================================
+      // v0.3.2: MODAL CLOSE FIST — only gesture active when modal is open
+      // ======================================================================
+      if (modalOpenRef.current) {
+        const mcs = modalCloseState.current;
+        let mCloseBlockReason = 'none';
+        let shouldAttemptClose = false;
+
+        // Compute fist inline (don't depend on rawGesture which is declared later)
+        const ftCheck = [8, 12, 16, 20], fbCheck = [5, 9, 13, 17];
+        let extF = 0;
+        for (let i = 0; i < 4; i++) {
+          const dt = Math.hypot(landmarks[ftCheck[i]].x - wrist.x, landmarks[ftCheck[i]].y - wrist.y);
+          const db = Math.hypot(landmarks[fbCheck[i]].x - wrist.x, landmarks[fbCheck[i]].y - wrist.y);
+          if (dt > db * 1.5) extF++;
+        }
+        const dtThumb = Math.hypot(landmarks[4].x - wrist.x, landmarks[4].y - wrist.y);
+        const dbThumb = Math.hypot(landmarks[2].x - wrist.x, landmarks[2].y - wrist.y);
+        if (dtThumb > dbThumb * 1.2) extF++;
+        const isFistNow = extF <= 1;
+
+        // Check gate conditions
+        const graceElapsed = (now - modalOpenedAtRef.current) >= MODAL_OPEN_GRACE_MS;
+        if (!onModalCloseGestureRef.current) mCloseBlockReason = 'callback missing';
+        else if (!graceElapsed) mCloseBlockReason = 'grace period';
+        else shouldAttemptClose = true;
+
+        if (isFistNow && shouldAttemptClose) {
+          if (mcs.fistSince === 0) mcs.fistSince = now;
+          mcs.closeTriggered = false;
+          const fistDur = now - mcs.fistSince;
+          const inCd = (now - mcs.lastCloseTriggeredAt) < MODAL_CLOSE_COOLDOWN_MS;
+          if (fistDur >= MODAL_CLOSE_FIST_HOLD_MS && !inCd && !mcs.closeTriggered) {
+            mcs.closeTriggered = true;
+            mcs.lastCloseTriggeredAt = now;
+            onModalCloseGestureRef.current();
+          }
+        } else if (isFistNow && !shouldAttemptClose) {
+          if (mcs.fistSince === 0) mcs.fistSince = now;
+        } else {
+          if (mcs.fistSince !== 0) { mcs.fistSince = 0; mcs.closeTriggered = false; }
+        }
+
+        // Modal debug HUD row + status + skip everything else
+        if (DEBUG_GESTURES) {
+          const mGraceR = Math.max(0, Math.ceil((MODAL_OPEN_GRACE_MS - (now - modalOpenedAtRef.current)) / 100) / 10);
+          const mCdR = Math.max(0, Math.ceil((MODAL_CLOSE_COOLDOWN_MS - (now - mcs.lastCloseTriggeredAt)) / 100) / 10);
+          setDebugInfo(prev => ({
+            ...prev,
+            modalOpen: true,
+            modalCloseFist: isFistNow,
+            modalCloseHoldMs: isFistNow ? Math.round(now - mcs.fistSince) : 0,
+            modalGraceRemaining: mGraceR,
+            modalCloseCdRemaining: mCdR,
+            modalCloseBlockReason: isFistNow && !shouldAttemptClose ? mCloseBlockReason : 'none',
+          }));
+        }
+
+        if (isFistNow) {
+          const fistDur = now - mcs.fistSince;
+          const graceElapsedNow = (now - modalOpenedAtRef.current) >= MODAL_OPEN_GRACE_MS;
+          if (!graceElapsedNow) {
+            setGestureStatus(`Modal grace ${Math.round((MODAL_OPEN_GRACE_MS-(now-modalOpenedAtRef.current))/100)/10}s...`);
+          } else {
+            setGestureStatus(`Fist to close ${Math.round(fistDur)}ms / ${MODAL_CLOSE_FIST_HOLD_MS}ms`);
+          }
+        } else {
+          setGestureStatus('Fist hold to close modal');
+        }
+        return; // SKIP open/fist mode switch entirely
+      } else {
+        // Not in modal mode — reset modal close state
+        const mcs = modalCloseState.current;
+        if (mcs.fistSince !== 0) { mcs.fistSince = 0; mcs.closeTriggered = false; }
       }
 
       // ======================================================================
@@ -481,8 +626,15 @@ export const GestureController: React.FC<GestureControllerProps> = ({
         setGestureStatus('Released: Memory Constellation');
       }
 
+      // v0.3.2: Post-modal grace — suppress fist if modal was just closed;
+      // reset early if user opens hand (they're now intentionally navigating)
+      const inPostModalGrace = modalClosedAtRef.current > 0 && (now - modalClosedAtRef.current) < POST_MODAL_GRACE_MS;
+      if (inPostModalGrace && isOpen) {
+        modalClosedAtRef.current = 0; // user opened hand → cancel grace
+      }
+
       // 5. Trigger fist → FORMED (gather memory core)
-      if (isFist && heldLongEnough && notYetTriggered && !inCooldown && currentModeNow !== targetModeFist) {
+      if (isFist && heldLongEnough && notYetTriggered && !inCooldown && !inPostModalGrace && currentModeNow !== targetModeFist) {
         hs.triggerConsumed = true;
         hs.lastTriggeredAt = now;
         hs.lastTriggeredGesture = 'fist';
@@ -576,22 +728,44 @@ export const GestureController: React.FC<GestureControllerProps> = ({
         </p>
       </div>
 
-      {/* v0.3.1-lite: Pinch Debug HUD */}
+      {/* v0.3.2: Pinch + Modal Close Debug HUD */}
       {DEBUG_GESTURES && (
         <div className="mt-2 w-[18.75vw] pointer-events-auto">
           <div className="bg-black/70 backdrop-blur-sm border border-[#D4AF37]/20 rounded p-2 text-right">
             <p className="text-[10px] text-[#D4AF37]/60 font-mono leading-tight">
-              cand: {debugInfo.candidate ? 'YES' : 'no'}
-              {' | '}ratio: {debugInfo.pinchRatio}
-              {' | '}pinch: {debugInfo.pinchDetected ? 'YES' : 'no'}
-            </p>
-            <p className="text-[10px] text-[#D4AF37]/40 font-mono leading-tight">
-              hold: {debugInfo.pinchHoldMs}/{PINCH_HOLD_MS}ms
-              {' | '}cd: {debugInfo.pinchCooldownRemaining}s
-              {debugInfo.lastBlockReason !== 'none' && (
-                <span className="text-red-400/60">{' | '}BLOCK: {debugInfo.lastBlockReason}</span>
+              modal: {debugInfo.modalOpen ? 'YES' : 'no'}
+              {debugInfo.modalOpen && (
+                <>
+                  {' | '}fist: {debugInfo.modalCloseFist ? 'YES' : 'no'}
+                  {' | '}hold: {debugInfo.modalCloseHoldMs}/{MODAL_CLOSE_FIST_HOLD_MS}ms
+                </>
               )}
             </p>
+            {debugInfo.modalOpen && (
+              <p className="text-[10px] text-[#D4AF37]/40 font-mono leading-tight">
+                grace: {debugInfo.modalGraceRemaining}s
+                {' | '}cd: {debugInfo.modalCloseCdRemaining}s
+                {debugInfo.modalCloseBlockReason !== 'none' && (
+                  <span className="text-red-400/60">{' | '}BLOCK: {debugInfo.modalCloseBlockReason}</span>
+                )}
+              </p>
+            )}
+            {!debugInfo.modalOpen && (
+              <>
+                <p className="text-[10px] text-[#D4AF37]/60 font-mono leading-tight">
+                  cand: {debugInfo.candidate ? 'YES' : 'no'}
+                  {' | '}ratio: {debugInfo.pinchRatio}
+                  {' | '}pinch: {debugInfo.pinchDetected ? 'YES' : 'no'}
+                </p>
+                <p className="text-[10px] text-[#D4AF37]/40 font-mono leading-tight">
+                  hold: {debugInfo.pinchHoldMs}/{PINCH_HOLD_MS}ms
+                  {' | '}cd: {debugInfo.pinchCooldownRemaining}s
+                  {debugInfo.lastBlockReason !== 'none' && (
+                    <span className="text-red-400/60">{' | '}BLOCK: {debugInfo.lastBlockReason}</span>
+                  )}
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}

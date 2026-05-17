@@ -176,11 +176,26 @@ export default function App() {
     // v0.3.1-lite: no-op — two-hands lock is disabled
   }, []);
 
+  // v0.3.2: Track when modal opened for grace period
+  const [modalOpenedAt, setModalOpenedAt] = useState<number>(0);
+  // v0.3.2: Ref for modal close callback to avoid stale closure
+  const selectedMemoryRef = useRef<MemoryPhoto | null>(null);
+  useEffect(() => {
+    selectedMemoryRef.current = selectedMemory;
+  }, [selectedMemory]);
+
+  // v0.3.2: Fist hold → close modal callback
+  const handleModalCloseGesture = useCallback(() => {
+    if (!selectedMemoryRef.current) return;
+    setSelectedMemory(null);
+  }, []);
+
   // v0.3.1-lite: Pinch hold → open current candidate directly
   const handlePinchConfirm = useCallback(() => {
     const memory = candidateMemoryRef.current;
     if (!memory) return;
     setSelectedMemory(memory);
+    setModalOpenedAt(performance.now()); // v0.3.2: record open time for grace
   }, []);
 
   const handlePhotosUpload = (photos: string[]) => {
@@ -204,7 +219,7 @@ export default function App() {
               twoHandsDetected={twoHandsDetected}
               memories={memories}
               focusedPhotoId={focusedPhotoId}
-              onPhotoSelect={setSelectedMemory}
+              onPhotoSelect={(photo) => { setSelectedMemory(photo); setModalOpenedAt(performance.now()); }}
               onFocusedPhotoIdChange={handleFocusedPhotoIdChange}
               candidatePhotoId={candidateMemory?.id ?? null}
               onCandidatePhotoChange={handleCandidatePhotoChange}
@@ -240,7 +255,7 @@ export default function App() {
         </div>
       )}
       
-      {/* Gesture Control Module — v0.3.1: navigation + photo selection gestures */}
+      {/* Gesture Control Module — v0.3.2: modal close gesture */}
       <GestureController
         currentMode={mode}
         onModeChange={setMode}
@@ -251,6 +266,9 @@ export default function App() {
         hasCandidatePhoto={candidateMemory !== null}
         onLockPhotoGesture={handleLockPhotoGesture}
         onPinchConfirm={handlePinchConfirm}
+        modalOpen={selectedMemory !== null}
+        modalOpenedAt={modalOpenedAt}
+        onModalCloseGesture={handleModalCloseGesture}
       />
       
       {/* v0.3: Memory Detail Modal — replaces old two-hand photo overlay */}
@@ -258,6 +276,17 @@ export default function App() {
         memory={selectedMemory}
         onClose={() => setSelectedMemory(null)}
       />
+
+      {/* v0.3.2: Fist-to-close hint when modal is open */}
+      {selectedMemory && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none animate-fade-in">
+          <div className="bg-black/40 backdrop-blur-sm border border-[#D4AF37]/20 rounded-full px-4 py-1.5">
+            <p className="text-[#D4AF37]/50 font-serif text-xs tracking-wider text-center">
+              握拳保持片刻，收起这段回忆
+            </p>
+          </div>
+        </div>
+      )}
       
       {/* v0.3.1-lite: Gesture photo selection status hint */}
       {!selectedMemory && uploadedPhotos.length > 0 && (

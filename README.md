@@ -4,7 +4,7 @@
 
 ## 📝 版本
 
-**v0.3.1-lite**：Gesture Photo Selection — 中心候选 + 捏合直接打开（简化无锁定版本）。
+**v0.3.2**：Gesture Close Memory Modal — 握拳保持关闭照片详情。
 
 ## 🛠️ 快速开始
 
@@ -59,7 +59,7 @@
 3. **弹窗打开时**：手势导航暂停，避免阅读时视角乱动
 4. **双手检测聚焦**：双手进入画面时会高亮最近的照片，但不自动打开详情
 
-### 手势照片选择（v0.3.1 新增）
+### 手势照片选择（v0.3.1-lite 新增）
 
 v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 
@@ -68,6 +68,14 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 3. **Debug HUD**：摄像头预览下方显示 pinch 调试信息（candidate yes/no、pinchRatio、pinchDetected、hold time、cooldown、block reason）。后续可设置 `DEBUG_GESTURES = false` 隐藏。
 4. **鼠标点击仍然可用**：hover 发光，点击打开详情。
 5. **详情打开时**：手势导航和 pinch 选择都暂停。
+
+### 手势关闭照片详情（v0.3.2 新增）
+
+1. **握拳关闭**：MemoryModal 打开时，系统进入 Modal Gesture Mode。此时只检测一个手势：握拳。握拳保持约 600ms 即可关闭弹窗。
+2. **保护期**：弹窗刚打开后有 800ms 保护时间，避免 hand 残留造成误关。
+3. **弹窗打开期间不触发其他手势**：张手不会切换星云状态，pinch 不会重复打开，手掌移动不会旋转视角。
+4. **关闭后恢复正常**：弹窗关闭后，张手/握拳/pinch/鼠标功能即刻恢复。
+5. **Debug HUD**：弹窗打开时 HUD 显示 modal:YES、fist 状态、hold 进度、grace 剩余、cooldown 剩余、block reason。
 
 ## 🏗️ 技术栈
 
@@ -89,10 +97,11 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - **v0.2.2** ✅ Nebula Bodies Polish：天体化重构装饰物
 - **v0.2.3** ✅ Stellar Systems Polish：多恒星行星系统
 - **v0.2.4** ✅ Lighting Hierarchy Polish：光照层级优化
-- **v0.2.5** ✅ Photo Volume Distribution：照片体积分布优化（当前）
+- **v0.2.5** ✅ Photo Volume Distribution：照片体积分布优化
 - **v0.3** ✅ 拍立得照片可点击，展示时间和文字
-- **v0.3.1** ✅ 手势聚焦 + 捏合打开照片（当前，lite 模式无双手锁定）
-- **v0.3.2** 双手锁定 + pinch 完整流程
+- **v0.3.1** ✅ 中心候选 + 捏合打开照片
+- **v0.3.2** ✅ 握拳保持关闭照片详情（当前）
+- **v0.3.3** (未来) 双手锁定 + pinch 完整流程
 - **v0.4** 新增时间隧道模式，先用按钮进入
 - **v0.5** 增加推手势进入时间隧道
 - **v0.6** 加纪念日终章、信件、音乐、分享
@@ -190,6 +199,48 @@ selectedMemory（MemoryModal 打开，导航暂停）
 **Pinch 检测：** `distance(thumb[4], index[8]) / distance(wrist[0], middleMCP[9]) < 0.5`；保持 300ms 触发；1000ms 冷却。
 
 **Debug HUD：** 摄像头预览下方显示 candidate yes/no、pinchRatio、pinchDetected、hold time、cooldown remaining、block reason。设置 `DEBUG_GESTURES = false` 可隐藏。
+
+---
+
+## 👊 v0.3.2 Gesture Close Memory Modal
+
+v0.3.2 为 MemoryModal 增加了手势关闭能力。当照片详情打开时，系统进入 **Modal Gesture Mode**，暂停所有空间导航、pinch 选择和星云状态切换，只检测一个关闭手势：**握拳保持**。握拳代表"收起这段回忆"。
+
+**Modal Gesture Mode 规则：**
+- ❌ 张手 → 不切换星云状态
+- ❌ 握拳 → 不收拢核心（仅关闭 modal）
+- ❌ Pinch → 不打开其他照片
+- ❌ 手掌移动 → 不旋转视角
+- ✅ 握拳保持 600ms → 关闭 MemoryModal
+
+**保护机制：**
+- **Grace period（800ms）**：弹窗刚打开后的保护时间，避免 pinch 打开照片时的手型残留造成误关
+- **Cooldown（1000ms）**：关闭后短时间内再次握拳不会重复触发
+- **Fist 不受模式切换 cooldown 影响**：Modal 模式下的关闭 fist 有独立状态和 cooldown
+
+**关闭后恢复：** Modal 关闭后，所有普通手势（张手/握拳/pinch/导航）立即恢复正常。
+
+**状态机（完整流程）：**
+
+```
+探索 ←────────────────────────┐
+  ↓                           │
+视角移动 → candidate（弱高亮）    │
+  ↓ pinch 300ms               │
+MemoryModal 打开               │
+  │ (导航暂停，pinch 暂停)      │
+  │                           │
+  ├── 握拳 600ms ─────────────┘
+  ├── Esc / X / 背景点击 ───────┘
+  └── 握拳收拢核心时自动关闭 ────┘
+```
+
+**常量：**
+| 参数 | 值 |
+|---|---|
+| `MODAL_CLOSE_FIST_HOLD_MS` | 600ms |
+| `MODAL_CLOSE_COOLDOWN_MS` | 1000ms |
+| `MODAL_OPEN_GRACE_MS` | 800ms |
 
 ---
 
