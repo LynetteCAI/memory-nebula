@@ -150,7 +150,7 @@ export const Experience: React.FC<ExperienceProps> = ({
         position={isChrono ? [0, 0, -12] : [0, 0, 0]}
         scale={isChrono ? 1.35 : 1}
       >
-        <Foliage mode={mode} count={6000} />
+        <Foliage mode={mode} count={12000} />
         <Ornaments mode={mode} count={600} />
       </group>
         <Polaroids

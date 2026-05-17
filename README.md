@@ -4,7 +4,7 @@
 
 ## 📝 版本
 
-**v0.4.2**：Stellar Orbit Systems Polish — 恒星椭圆轨道系统升级，行星公转 + 轨道线可视化（当前）。
+**v0.4.3**：Dust Lighting Polish — 星际尘埃发光策略优化，三层尘埃体系（当前）。
 
 ## 🛠️ 快速开始
 
@@ -106,7 +106,8 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - **v0.4** ✅ Chrono Stream 时间流，按钮进入
 - **v0.4.1** ✅ Chrono Stream 手势隔离与背景退流
 - **v0.4.2** ✅ 恒星椭圆轨道系统升级
-- **v0.4.3** ⏳ 时间流视觉增强：日期刻度、星尘拉伸
+- **v0.4.3** ✅ 星际尘埃发光策略优化
+- **v0.4.4** ⏳ 时间流视觉增强：日期刻度、星尘拉伸
 - **v0.4.3** ⏳ 时间流手势切换：左右挥手上一张/下一张
 - **v0.5** ⏳ 增加推手势进入时间隧道
 
@@ -128,6 +129,43 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - 回忆管理器：上传、编辑、删除、批量操作（v0.3.4）
 - IndexedDB 本地持久化存储（v0.3.4）
 - JSON 导入/导出备份（v0.3.4）
+
+---
+
+## ✨ v0.4.3 Dust Lighting Polish
+
+v0.4.3 优化了星际尘埃的发光策略。此前大多数 Foliage 粒子都像自发光星点，容易造成密集噪点感。本版本将尘埃分成三层：大多数为低亮度的 base dust，模拟被环境光或恒星光轻微照亮；一部分为 reflected highlights，模拟反射/散射附近星光；极少数为 spark stars，保留轻微闪烁和自发光星点。
+
+### 三层尘埃体系
+
+| 层级 | 占比 | 亮度 | Alpha | Sparkle | 颜色 |
+|------|:---:|:---:|:---:|:---:|------|
+| **baseDust** (0) | 75% | 0.22× | 0.22× | 几乎无(0.99阈值) | 深蓝/灰蓝/暗紫/暗象牙 |
+| **reflectedHighlight** (1) | 20% | 0.48× | 0.45× | 弱(0.95阈值, 0.18强度) | 蓝白/香槟金/淡紫 |
+| **sparkStar** (2) | 5% | 1.05× | 0.85× | 可见(0.88阈值, 0.35强度) | 暖白/蓝白/香槟 |
+
+### 模式差异
+
+| 模式 | 全局强度 | 效果 |
+|------|:---:|------|
+| FORMED | 0.85 | 核心微光，不闪 |
+| CHAOS | 0.75 | 空间氛围，柔和 |
+| CHRONO_STREAM | 0.48 | 退为背景，不抢照片 |
+
+### 粒子大小
+
+- baseDust：0.75×（更小、更分散）
+- reflectedHighlight：0.95×（保持标准）
+- sparkStar：1.15×（略大，作为稀有点缀）
+
+### 技术实现
+
+- **`aDustKind` 属性**：0=base, 1=highlight, 2=spark，由 index-based deterministic `dRand()` 分配，每次渲染一致
+- **`aLuminosity` 属性**：同类内的个体亮度微调（0.5–1.0）
+- **Vertex shader**：按 kind 选择色板（深色/中色/亮色），按 kind 控制 sparkle 阈值和强度，按 kind 缩放粒子大小
+- **Fragment shader**：按 kind 应用不同的 intensity 和 alpha 乘数，全局乘以 `uChronoIntensity` 实现模式调光
+- **`uChronoIntensity` uniform**：在 useFrame 中根据 mode 平滑过渡（formed=0.85, chaos=0.75, chrono=0.48）
+- **保留所有现有动画**：drift/breathing、FORMED↔CHAOS 位置过渡、进度 easing 完全不变
 
 ---
 
