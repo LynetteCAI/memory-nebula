@@ -17,7 +17,27 @@ const GESTURE_COOLDOWN_MS = 1000;
 const GESTURE_UNKNOWN_RESET_MS = 300;
 
 /** Dead zone fraction: hand movements within ±DEAD_ZONE from center are ignored */
-const NAVIGATION_DEAD_ZONE = 0.08;
+const NAVIGATION_DEAD_ZONE = 0.10;
+
+// ---------------------------------------------------------------------------
+// v0.4.5 Soft Dead Zone Utility
+// ---------------------------------------------------------------------------
+
+/**
+ * Smoothstep-based dead zone to eliminate center jump.
+ * Inside the dead zone: returns center (no movement).
+ * Outside: smooth transition from 0 using smoothstep easing.
+ */
+function applySoftDeadZone(value: number, center = 0.5, deadZone = 0.10): number {
+  const offset = value - center;
+  const abs = Math.abs(offset);
+  if (abs <= deadZone) return center;
+
+  const sign = Math.sign(offset);
+  const normalized = (abs - deadZone) / (0.5 - deadZone);
+  const eased = normalized * normalized * (3 - 2 * normalized); // smoothstep
+  return center + sign * eased * 0.5;
+}
 
 // ---------------------------------------------------------------------------
 // v0.3.1 Photo Selection Constants
@@ -458,19 +478,17 @@ export const GestureController: React.FC<GestureControllerProps> = ({
       const palmCenterY = (landmarks[0].y + landmarks[5].y + landmarks[9].y + landmarks[13].y + landmarks[17].y) / 5;
 
       // -----------------------------------------------------------------------
-      // v0.2.1 Hand position → camera navigation with dead zone
+      // v0.2.1 Hand position → camera navigation with soft dead zone (v0.4.5)
       // -----------------------------------------------------------------------
-      // Apply dead zone: ignore small movements around center to reduce jitter
-      const offsetX = palmCenterX - 0.5;
-      const offsetY = palmCenterY - 0.5;
-      const deadX = Math.abs(offsetX) < NAVIGATION_DEAD_ZONE ? 0.5 : palmCenterX;
-      const deadY = Math.abs(offsetY) < NAVIGATION_DEAD_ZONE ? 0.5 : palmCenterY;
+      // Soft dead zone: smoothstep transition eliminates center jump
+      const smoothX = applySoftDeadZone(palmCenterX, 0.5, NAVIGATION_DEAD_ZONE);
+      const smoothY = applySoftDeadZone(palmCenterY, 0.5, NAVIGATION_DEAD_ZONE);
       
-      setHandPos({ x: deadX, y: deadY });
+      setHandPos({ x: smoothX, y: smoothY });
       
       // Only send navigation updates when navigation is enabled (v0.3 hook)
       if (onHandPosition && gestureNavigationEnabledRef.current) {
-        onHandPosition(deadX, deadY, true);
+        onHandPosition(smoothX, smoothY, true);
       } else if (onHandPosition && !gestureNavigationEnabledRef.current) {
         // Navigation paused but hand IS detected — signal presence without position
         onHandPosition(0.5, 0.5, false);

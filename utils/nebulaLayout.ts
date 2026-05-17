@@ -155,39 +155,39 @@ export function getNebulaOrnamentPosition(
 export type PhotoLayer = 'inner' | 'middle' | 'outer';
 
 /**
- * v0.2.5: Deterministic 3-layer volume distribution for photos in FORMED state.
- *   Inner:  20% — r 1.8–2.8   embedded within the nebula volume
- *   Middle: 45% — r 2.7–4.2   primary distribution layer
- *   Outer:  35% — r 4.0–5.8   outer orbit, keeps some surrounding feel
+ * v0.4.5: Deterministic 3-layer volume distribution for photos in FORMED state.
+ *   Inner:  28% — r 0.9–1.8   embedded within the nebula core outer edge
+ *   Middle: 47% — r 1.8–3.2   primary distribution layer
+ *   Outer:  25% — r 3.0–4.4   outer orbit, keeps some surrounding feel
  */
 export function getNebulaPhotoLayer(index: number, total: number): PhotoLayer {
   if (total <= 1) return 'middle';
   const rnd = pseudoRandom(index, 47);
-  if (rnd < 0.20) return 'inner';
-  if (rnd < 0.65) return 'middle';
+  if (rnd < 0.28) return 'inner';
+  if (rnd < 0.75) return 'middle';
   return 'outer';
 }
 
 /**
  * Returns a scale factor for a photo based on layer and total count.
- * More photos → smaller scale. Inner layer photos are slightly smaller.
+ * v0.4.5: More compact scaling for tighter formed aggregation.
  */
 export function getNebulaPhotoScale(index: number, total: number): number {
   const layer = getNebulaPhotoLayer(index, total);
   let base: number;
-  if (total <= 12)       base = 0.65;
-  else if (total <= 24)  base = 0.56;
-  else if (total <= 40)  base = 0.48;
-  else                   base = 0.42;
+  if (total <= 12)       base = 0.55;
+  else if (total <= 24)  base = 0.48;
+  else if (total <= 40)  base = 0.40;
+  else                   base = 0.34;
 
-  if (layer === 'inner')  return base * 0.85;
-  if (layer === 'middle') return base;
-  return base * 1.06; // outer slightly larger
+  if (layer === 'inner')  return base * 0.78;
+  if (layer === 'middle') return base * 0.92;
+  return base * 1.00; // outer
 }
 
 /**
  * Generate a position for a polaroid photo in the Memory Nebula Core (FORMED).
- * v0.2.5: 3-layer volume distribution replaces single outer shell.
+ * v0.4.5: Tighter radii and higher inner-layer ratio.
  */
 export function getNebulaPhotoPosition(
   index: number,
@@ -199,9 +199,10 @@ export function getNebulaPhotoPosition(
   const layer = getNebulaPhotoLayer(index, total);
 
   let rMin: number, rMax: number;
-  if (layer === 'inner')      { rMin = 1.8; rMax = 2.8; }
-  else if (layer === 'middle') { rMin = 2.7; rMax = 4.2; }
-  else                         { rMin = 4.0; rMax = 5.8; }
+  // v0.4.5: Tighter radii — photos pulled closer into the nebula sphere
+  if (layer === 'inner')      { rMin = 0.9; rMax = 1.8; }
+  else if (layer === 'middle') { rMin = 1.8; rMax = 3.2; }
+  else                         { rMin = 3.0; rMax = 4.4; }
 
   const r = rMin + pseudoRandom(index, 49) * (rMax - rMin);
 

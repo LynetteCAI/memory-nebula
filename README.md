@@ -4,7 +4,7 @@
 
 ## 📝 版本
 
-**v0.4.4**：Chrono Stream Dedicated Gestures — 时间流专属手势（当前）。
+**v0.4.5**：Nebula Interaction & Photo Layout Polish — 星云交互与照片布局优化（当前）。
 
 ## 🛠️ 快速开始
 
@@ -108,6 +108,7 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - **v0.4.2** ✅ 恒星椭圆轨道系统升级
 - **v0.4.3** ✅ 星际尘埃发光策略优化
 - **v0.4.4** ✅ 时间流专属手势：左右挥手、捏合打开、握拳关闭
+- **v0.4.5** ✅ 星云交互与照片布局优化：soft dead zone、视角灵敏度、照片收紧、session shuffle
 - **v0.5** ⏳ 增加推手势进入时间隧道
 
 ## ✨ 功能
@@ -126,9 +127,67 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - 拍立得照片可点击查看详情（v0.3）
 - 手势照片选择（v0.3.1）
 - 时间流专属手势：左右挥手、捏合、握拳关闭（v0.4.4）
+- 手势导航平滑死区与 view 灵敏度优化（v0.4.5）
+- 星云模式 session shuffle 随机编排（v0.4.5）
 - 回忆管理器：上传、编辑、删除、批量操作（v0.3.4）
 - IndexedDB 本地持久化存储（v0.3.4）
 - JSON 导入/导出备份（v0.3.4）
+
+---
+
+## 🎯 v0.4.5 Nebula Interaction & Photo Layout Polish
+
+v0.4.5 修复了星云模式手势视角在中心附近的跳变问题，将硬死区改为平滑死区并降低手势视角灵敏度，使用户更容易稳定选中照片。同时，聚合态下的照片被进一步收紧到记忆星云球内部，部分照片嵌入内层，尺寸也更紧凑。星云模式还新增 session-level shuffle：每次打开网页，FORMED/CHAOS 下照片会以新的随机编排出现；时间流模式仍然严格按日期排序，不受随机编排影响。
+
+### Soft Dead Zone
+
+- **问题**：手接近摄像头中心时，`handPosition.x` 从 0.5 瞬间跳到 0.58+，导致视角剧烈跳变
+- **解决方案**：使用 smoothstep 缓动函数实现平滑过渡
+  - 死区内：保持中心位置（0.5）
+  - 出死区：从 0 开始平滑增长，无跳变
+  - 越靠边响应越强
+- **参数**：`NAVIGATION_DEAD_ZONE = 0.10`（从 0.08 微调到 0.10）
+
+### 视角灵敏度优化
+
+| 参数 | 原值 | 新值 |
+|------|:---|:---|
+| 水平旋转范围 | `Math.PI * 3` (±270°) | `Math.PI * 1.35` (±121°) |
+| Y 轴映射 | `(y - 0.2) * 2.0` 偏移 | `yNorm` 直接 clamp |
+| 相机跟随 | `delta * 8` 线性 | `1 - exp(-delta * 3.5)` 指数平滑 |
+
+### FORMED 聚合态照片收紧
+
+| 层级 | 原半径 | 新半径 | 原比例 | 新比例 |
+|------|:---|:---|:---:|:---:|
+| inner | 1.8–2.8 | 0.9–1.8 | 20% | 28% |
+| middle | 2.7–4.2 | 1.8–3.2 | 45% | 47% |
+| outer | 4.0–5.8 | 3.0–4.4 | 35% | 25% |
+
+| 照片数 | 原 scale | 新 scale |
+|------|:---:|:---:|
+| ≤12 | 0.65 | 0.55 |
+| ≤24 | 0.56 | 0.48 |
+| ≤40 | 0.48 | 0.40 |
+| >40 | 0.42 | 0.34 |
+| inner 系数 | ×0.85 | ×0.78 |
+| middle 系数 | ×1.00 | ×0.92 |
+| outer 系数 | ×1.06 | ×1.00 |
+
+### Session Shuffle
+
+- **nebulaMemories**：每次页面加载时用 `Date.now()` 作为种子，对 `memories` 做 deterministic shuffle
+- **chronoMemories**：仍然按 `date → createdAt → order` 排序
+- **displayMemories**：CHRONO_STREAM 用 chronoMemories，否则用 nebulaMemories
+- 同一 session 内顺序稳定，增删照片后重新 shuffle
+
+### 技术实现
+
+- **`applySoftDeadZone()`**：新增工具函数，使用 smoothstep 实现平滑死区
+- **`utils/memoryShuffle.ts`**：新增 seeded hash shuffle 工具
+- **`Experience.tsx`**：`HAND_AZIMUTH_RANGE`、`yNorm` 直接映射、指数平滑跟随
+- **`utils/nebulaLayout.ts`**：`getNebulaPhotoLayer` 比率调整、`getNebulaPhotoPosition` 半径收紧、`getNebulaPhotoScale` 更紧凑
+- **`App.tsx`**：`nebulaMemories` + `chronoMemories` 双数组，`displayMemories` 按 mode 选择
 
 ---
 

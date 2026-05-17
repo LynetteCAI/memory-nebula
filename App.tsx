@@ -9,6 +9,7 @@ import { MemoryModal } from './components/MemoryModal';
 import { MemoryManager } from './components/MemoryManager';
 import { TreeMode, MemoryPhoto } from './types';
 import { compareMemoryByTime } from './utils/memorySort';
+import { shuffleMemoriesForSession } from './utils/memoryShuffle';
 import {
   getAllMemories,
   saveMemory,
@@ -82,15 +83,23 @@ export default function App() {
   // v0.4: Chrono Stream state
   const [focusIndex, setFocusIndex] = useState(0);
 
+  // v0.4.5: Session-level shuffle seed — generated once per page load
+  const nebulaShuffleSeedRef = useRef(Date.now());
+
+  // v0.4.5: Nebula memories — session-shuffled for FORMED/CHAOS mode variety
+  const nebulaMemories = useMemo(() => {
+    return shuffleMemoriesForSession(memories, nebulaShuffleSeedRef.current);
+  }, [memories]);
+
   // v0.4: Chrono-sorted memories (by date, then createdAt, then order)
   const chronoMemories = useMemo(() => {
     return [...memories].sort(compareMemoryByTime);
   }, [memories]);
 
-  // v0.4: Display memories — chrono-sorted in CHRONO_STREAM, original order otherwise
+  // v0.4.5: Display memories — chrono-sorted in CHRONO_STREAM, shuffled otherwise
   const displayMemories = useMemo(() => {
-    return mode === TreeMode.CHRONO_STREAM ? chronoMemories : memories;
-  }, [mode, memories, chronoMemories]);
+    return mode === TreeMode.CHRONO_STREAM ? chronoMemories : nebulaMemories;
+  }, [mode, nebulaMemories, chronoMemories]);
 
   // v0.4: Display URLs derived from displayMemories
   const displayUrls = useMemo(() => displayMemories.map((m) => m.url), [displayMemories]);

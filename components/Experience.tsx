@@ -4,6 +4,7 @@ import { Environment, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette, Noise } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import { useFrame, useThree } from '@react-three/fiber';
+import * as THREE from 'three';
 import { Foliage } from './Foliage';
 import { Ornaments } from './Ornaments';
 import { Polaroids } from './Polaroids';
@@ -71,22 +72,15 @@ export const Experience: React.FC<ExperienceProps> = ({
     if (controlsRef.current && handPosition.detected) {
       const controls = controlsRef.current;
       
-      // Map hand position to spherical coordinates
-      // x: 0 (left) to 1 (right) -> azimuthal angle (horizontal rotation)
-      // y: 0 (top) to 1 (bottom) -> polar angle (vertical tilt)
+      // v0.4.5: Reduced azimuth range for gentler horizontal rotation
+      const HAND_AZIMUTH_RANGE = Math.PI * 1.35;
+      const targetAzimuth = (handPosition.x - 0.5) * HAND_AZIMUTH_RANGE;
       
-      // Target azimuthal angle: increased range for larger rotation
-      const targetAzimuth = (handPosition.x - 0.5) * Math.PI * 3; // Increased from 2 to 3
-      
-      // Adjust Y mapping so natural hand position gives best view
-      // Offset Y so hand at 0.4-0.5 range gives centered view
-      const adjustedY = (handPosition.y - 0.2) * 2.0; // Increased sensitivity from 1.5 to 2.0
-      const clampedY = Math.max(0, Math.min(1, adjustedY)); // Clamp to 0-1
-      
-      // Target polar angle: PI/4 to PI/1.8 (constrained vertical angle)
-      const minPolar = Math.PI / 4;
-      const maxPolar = Math.PI / 1.8;
-      const targetPolar = minPolar + clampedY * (maxPolar - minPolar);
+      // v0.4.5: Smoother Y mapping — direct norm clamp, no offset
+      const yNorm = Math.max(0, Math.min(1, handPosition.y));
+      const minPolar = Math.PI / 3.2;
+      const maxPolar = Math.PI / 1.75;
+      const targetPolar = THREE.MathUtils.lerp(minPolar, maxPolar, yNorm);
       
       // Get current angles
       const currentAzimuth = controls.getAzimuthalAngle();
@@ -97,10 +91,10 @@ export const Experience: React.FC<ExperienceProps> = ({
       if (azimuthDiff > Math.PI) azimuthDiff -= Math.PI * 2;
       if (azimuthDiff < -Math.PI) azimuthDiff += Math.PI * 2;
       
-      // Smoothly interpolate angles
-      const lerpSpeed = 8; // Increased from 5 to 8 for faster response
-      const newAzimuth = currentAzimuth + azimuthDiff * delta * lerpSpeed;
-      const newPolar = currentPolar + (targetPolar - currentPolar) * delta * lerpSpeed;
+      // v0.4.5: Exponential easing for smooth camera follow
+      const follow = 1 - Math.exp(-delta * 3.5);
+      const newAzimuth = currentAzimuth + azimuthDiff * follow;
+      const newPolar = currentPolar + (targetPolar - currentPolar) * follow;
       
       // Calculate new camera position in spherical coordinates
       const radius = controls.getDistance();
