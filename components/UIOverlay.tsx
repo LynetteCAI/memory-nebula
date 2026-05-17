@@ -334,7 +334,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ mode, onToggle, onPhotosUp
             张开手掌 · 释放记忆星云 &nbsp;|&nbsp; 握拳 · 收拢记忆核心
           </p>
           <p className="text-[#F5E6BF]/20 font-serif text-[10px] tracking-wider text-center">
-            双手进入画面 · 聚焦最近的照片
+            捏合手指 · 打开中心候选照片
           </p>
         </div>
       </div>

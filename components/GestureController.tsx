@@ -19,6 +19,30 @@ const GESTURE_UNKNOWN_RESET_MS = 300;
 /** Dead zone fraction: hand movements within ±DEAD_ZONE from center are ignored */
 const NAVIGATION_DEAD_ZONE = 0.08;
 
+// ---------------------------------------------------------------------------
+// v0.3.1 Photo Selection Constants
+// ---------------------------------------------------------------------------
+
+/** How long both hands must be detected before firing lock photo gesture */
+const TWO_HANDS_LOCK_HOLD_MS = 500;
+
+/** Cooldown after a lock photo gesture before another lock is allowed */
+const TWO_HANDS_LOCK_COOLDOWN_MS = 1000;
+
+/** Pinch ratio threshold: pinchDistance / palmSize below this is a pinch */
+const PINCH_RATIO_THRESHOLD = 0.5;
+
+/** How long pinch must be held before confirming open */
+const PINCH_HOLD_MS = 300;
+
+/** Cooldown after pinch confirm before another pinch is allowed */
+const PINCH_COOLDOWN_MS = 1000;
+
+/** Debug HUD for gesture photo selection */
+const DEBUG_GESTURES = true;
+/** Min interval between debug HUD re-renders (ms) */
+const DEBUG_HUD_INTERVAL_MS = 100;
+
 type RawGesture = 'open' | 'fist' | 'unknown' | 'none';
 
 interface GestureControllerProps {
@@ -28,6 +52,15 @@ interface GestureControllerProps {
   onTwoHandsDetected?: (detected: boolean) => void;
   /** Pause gesture-driven camera navigation (e.g. when a detail modal is open). v0.3 hook. */
   gestureNavigationEnabled?: boolean;
+  // --- v0.3.1 Photo selection gestures ---
+  /** Enable gesture-based photo selection (pinch). Should be false when modal is open. */
+  gesturePhotoSelectionEnabled?: boolean;
+  /** Whether a candidate photo exists near screen center */
+  hasCandidatePhoto?: boolean;
+  /** Called when two-hands hold triggers: lock current candidate photo (v0.3.1-lite: not used) */
+  onLockPhotoGesture?: () => void;
+  /** Called when pinch hold triggers: open current candidate photo */
+  onPinchConfirm?: () => void;
 }
 
 export const GestureController: React.FC<GestureControllerProps> = ({ 
@@ -36,6 +69,10 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   onHandPosition, 
   onTwoHandsDetected,
   gestureNavigationEnabled = true,
+  gesturePhotoSelectionEnabled = true,
+  hasCandidatePhoto = false,
+  onLockPhotoGesture,
+  onPinchConfirm,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,22 +82,61 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   
   // Keep a ref to currentMode for the rAF closure
   const currentModeRef = useRef<TreeMode>(currentMode);
+  // v0.3.1-lite: Refs for props used inside detectGesture (avoid stale closure)
+  const hasCandidatePhotoRef = useRef(hasCandidatePhoto);
+  const gestureNavigationEnabledRef = useRef(gestureNavigationEnabled);
+  const gesturePhotoSelectionEnabledRef = useRef(gesturePhotoSelectionEnabled);
   
   // -------------------------------------------------------------------------
   // v0.2.1 Stable-hold trigger state (replaces old frame-count debounce)
   // -------------------------------------------------------------------------
   const holdState = useRef({
     candidateGesture: 'none' as RawGesture,
-    candidateSince: 0,         // performance.now() when candidate was first seen
-    lastUnknownSince: 0,       // when we last entered 'unknown' state
-    lastTriggeredAt: 0,        // performance.now() when last mode switch fired
+    candidateSince: 0,
+    lastUnknownSince: 0,
+    lastTriggeredAt: 0,
     lastTriggeredGesture: 'none' as RawGesture,
-    triggerConsumed: false,    // has this hold already triggered? (prevent re-fire)
+    triggerConsumed: false,
   });
+
+  // -------------------------------------------------------------------------
+  // v0.3.1 Two-hands lock state
+  // -------------------------------------------------------------------------
+  const twoHandsHold = useRef({
+    twoHandsSince: 0,           // performance.now() when both hands first detected
+    twoHandsLocked: false,      // has this two-hands period already fired lock?
+    lastLockTriggeredAt: 0,     // last lock fire time (for cooldown)
+  });
+
+  // -------------------------------------------------------------------------
+  // v0.3.1 Pinch gesture state
+  // -------------------------------------------------------------------------
+  const pinchState = useRef({
+    pinching: false,            // is a pinch currently in progress?
+    pinchSince: 0,              // when pinch started
+    lastPinchTriggeredAt: 0,    // last pinch confirm fire time
+    pinchTriggered: false,      // has this pinch already fired?
+  });
+
+  // -------------------------------------------------------------------------
+  // v0.3.1 Debug HUD state (throttled at ~10fps)
+  // -------------------------------------------------------------------------
+  const [debugInfo, setDebugInfo] = useState({
+    candidate: false,
+    pinchRatio: 0,
+    pinchDetected: false,
+    pinchHoldMs: 0,
+    pinchCooldownRemaining: 0,
+    lastBlockReason: 'none' as string,
+  });
+  const lastDebugRender = useRef(0);
 
   useEffect(() => {
     currentModeRef.current = currentMode;
   }, [currentMode]);
+  useEffect(() => { hasCandidatePhotoRef.current = hasCandidatePhoto; }, [hasCandidatePhoto]);
+  useEffect(() => { gestureNavigationEnabledRef.current = gestureNavigationEnabled; }, [gestureNavigationEnabled]);
+  useEffect(() => { gesturePhotoSelectionEnabledRef.current = gesturePhotoSelectionEnabled; }, [gesturePhotoSelectionEnabled]);
 
   useEffect(() => {
     let handLandmarker: HandLandmarker | null = null;
@@ -201,9 +277,10 @@ export const GestureController: React.FC<GestureControllerProps> = ({
           // Draw all detected hands at once
           drawAllHands(result.landmarks);
           
-          // Use first hand for gesture detection
+          // Use first hand for gesture detection (includes pinch)
           const landmarks = result.landmarks[0];
-          detectGesture(landmarks);
+          // Pass all landmarks for pinch detection across any hand
+          detectGesture(landmarks, result.landmarks);
         } else {
             // v0.2.1: Hand lost — do NOT change mode, just stop navigation
             const modeName = currentModeRef.current === TreeMode.CHAOS ? 'Constellation' : 'Core';
@@ -236,7 +313,7 @@ export const GestureController: React.FC<GestureControllerProps> = ({
       animationFrameId = requestAnimationFrame(predictWebcam);
     };
 
-    const detectGesture = (landmarks: any[]) => {
+    const detectGesture = (landmarks: any[], allLandmarks?: any[][]) => {
       // 0 is Wrist
       // Tips: 8 (Index), 12 (Middle), 16 (Ring), 20 (Pinky)
       // Bases (MCP): 5, 9, 13, 17
@@ -259,24 +336,82 @@ export const GestureController: React.FC<GestureControllerProps> = ({
       setHandPos({ x: deadX, y: deadY });
       
       // Only send navigation updates when navigation is enabled (v0.3 hook)
-      if (onHandPosition && gestureNavigationEnabled) {
+      if (onHandPosition && gestureNavigationEnabledRef.current) {
         onHandPosition(deadX, deadY, true);
-      } else if (onHandPosition && !gestureNavigationEnabled) {
+      } else if (onHandPosition && !gestureNavigationEnabledRef.current) {
         // Navigation paused but hand IS detected — signal presence without position
         onHandPosition(0.5, 0.5, false);
       }
       
-      // -----------------------------------------------------------------------
-      // v0.2.1 Determine raw gesture type
-      // -----------------------------------------------------------------------
-      const fingerTips = [8, 12, 16, 20];
-      const fingerBases = [5, 9, 13, 17];
+      // ======================================================================
+      // v0.3.1-lite: PINCH DETECTION — runs FIRST, independent of open/fist
+      // ======================================================================
+      const now = performance.now();
+      const checkPinch = (h: any[]): number => {
+        const w = h[0], tTip = h[4], iTip = h[8], mMcp = h[9];
+        const pd = Math.hypot(tTip.x - iTip.x, tTip.y - iTip.y);
+        const palm = Math.hypot(w.x - mMcp.x, w.y - mMcp.y);
+        return palm === 0 ? 999 : pd / palm;
+      };
+      // v0.3.2: Verify middle/ring/pinky are extended — true pinch requires them open, not curled like a fist
+      const areNonPinchFingersExtended = (h: any[]): boolean => {
+        const w = h[0];
+        const checks: [number, number][] = [[12, 9], [16, 13], [20, 17]];
+        let extended = 0;
+        for (const [tipIdx, baseIdx] of checks) {
+          const dt = Math.hypot(h[tipIdx].x - w.x, h[tipIdx].y - w.y);
+          const db = Math.hypot(h[baseIdx].x - w.x, h[baseIdx].y - w.y);
+          if (dt > db * 1.3) extended++;
+        }
+        return extended >= 2;  // at least 2 of 3 non-pinch fingers must be extended
+      };
+      let bestRatio = 999;
+      let pinchHand: any[] | null = null;
+      const hands = (allLandmarks && allLandmarks.length > 0) ? allLandmarks : [landmarks];
+      for (const h of hands) {
+        const r = checkPinch(h);
+        if (r < bestRatio) { bestRatio = r; pinchHand = h; }
+      }
+      const rawPinch = bestRatio < PINCH_RATIO_THRESHOLD;
+      const anyPinch = rawPinch && pinchHand !== null && areNonPinchFingersExtended(pinchHand);
+
+      const ps = pinchState.current;
+      let blockReason = 'none', shouldPinch = false;
+      if (!gesturePhotoSelectionEnabledRef.current) blockReason = 'selection disabled';
+      else if (!hasCandidatePhotoRef.current) blockReason = 'no candidate';
+      else if (!onPinchConfirm) blockReason = 'no callback';
+      else shouldPinch = true;
+
+      if (anyPinch && shouldPinch) {
+        if (!ps.pinching) { ps.pinching = true; ps.pinchSince = now; ps.pinchTriggered = false; }
+        const dur = now - ps.pinchSince;
+        if (dur >= PINCH_HOLD_MS && !ps.pinchTriggered && (now - ps.lastPinchTriggeredAt) >= PINCH_COOLDOWN_MS) {
+          ps.pinchTriggered = true; ps.lastPinchTriggeredAt = now; onPinchConfirm();
+        }
+      } else if (anyPinch && !shouldPinch) {
+        if (!ps.pinching) ps.pinching = true;
+      } else {
+        if (ps.pinching) { ps.pinching = false; ps.pinchSince = 0; ps.pinchTriggered = false; }
+      }
+
+      if (DEBUG_GESTURES && now - lastDebugRender.current > DEBUG_HUD_INTERVAL_MS) {
+        lastDebugRender.current = now;
+        const cdR = Math.max(0, Math.ceil((PINCH_COOLDOWN_MS - (now - ps.lastPinchTriggeredAt)) / 100) / 10);
+        setDebugInfo({ candidate: hasCandidatePhotoRef.current, pinchRatio: Math.round(bestRatio*100)/100,
+          pinchDetected: anyPinch, pinchHoldMs: anyPinch?Math.round(now-ps.pinchSince):0,
+          pinchCooldownRemaining: cdR, lastBlockReason: anyPinch&&!shouldPinch?blockReason:'none' });
+      }
+
+      // ======================================================================
+      // v0.2.1 Determine raw gesture type (runs AFTER pinch)
+      // ======================================================================
+      const ft = [8, 12, 16, 20], fb = [5, 9, 13, 17];
       
       let extendedFingers = 0;
 
       for (let i = 0; i < 4; i++) {
-        const tip = landmarks[fingerTips[i]];
-        const base = landmarks[fingerBases[i]];
+        const tip = landmarks[ft[i]];
+        const base = landmarks[fb[i]];
         const distTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
         const distBase = Math.hypot(base.x - wrist.x, base.y - wrist.y);
         if (distTip > distBase * 1.5) {
@@ -302,9 +437,8 @@ export const GestureController: React.FC<GestureControllerProps> = ({
       }
 
       // -----------------------------------------------------------------------
-      // v0.2.1 Stable-hold trigger logic (replaces old frame-counter system)
+      // v0.2.1 Stable-hold trigger logic
       // -----------------------------------------------------------------------
-      const now = performance.now();
       const hs = holdState.current;
 
       // 1. Determine if gesture changed
@@ -356,8 +490,10 @@ export const GestureController: React.FC<GestureControllerProps> = ({
         setGestureStatus('Gathered: Memory Core');
       }
 
-      // 6. Update status text (only if not in triggered state)
-      if (hs.triggerConsumed) {
+      // --- v0.3.1-lite: Status text (pinch takes display priority) ---
+      if (ps.pinching) {
+        setGestureStatus(`Pinch ${Math.round(now-ps.pinchSince)}ms / ${PINCH_HOLD_MS}ms`);
+      } else if (hs.triggerConsumed) {
         // Already triggered — show locked state
         const modeName = currentModeNow === TreeMode.CHAOS ? 'Memory Constellation' : 'Memory Core';
         if (inCooldown) {
@@ -439,6 +575,26 @@ export const GestureController: React.FC<GestureControllerProps> = ({
           {gestureStatus}
         </p>
       </div>
+
+      {/* v0.3.1-lite: Pinch Debug HUD */}
+      {DEBUG_GESTURES && (
+        <div className="mt-2 w-[18.75vw] pointer-events-auto">
+          <div className="bg-black/70 backdrop-blur-sm border border-[#D4AF37]/20 rounded p-2 text-right">
+            <p className="text-[10px] text-[#D4AF37]/60 font-mono leading-tight">
+              cand: {debugInfo.candidate ? 'YES' : 'no'}
+              {' | '}ratio: {debugInfo.pinchRatio}
+              {' | '}pinch: {debugInfo.pinchDetected ? 'YES' : 'no'}
+            </p>
+            <p className="text-[10px] text-[#D4AF37]/40 font-mono leading-tight">
+              hold: {debugInfo.pinchHoldMs}/{PINCH_HOLD_MS}ms
+              {' | '}cd: {debugInfo.pinchCooldownRemaining}s
+              {debugInfo.lastBlockReason !== 'none' && (
+                <span className="text-red-400/60">{' | '}BLOCK: {debugInfo.lastBlockReason}</span>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

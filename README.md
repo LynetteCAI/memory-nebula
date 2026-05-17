@@ -4,7 +4,7 @@
 
 ## 📝 版本
 
-**v0.3**：Memory Detail Modal — 拍立得照片可点击，展示时间和文字故事。
+**v0.3.1-lite**：Gesture Photo Selection — 中心候选 + 捏合直接打开（简化无锁定版本）。
 
 ## 🛠️ 快速开始
 
@@ -59,6 +59,16 @@
 3. **弹窗打开时**：手势导航暂停，避免阅读时视角乱动
 4. **双手检测聚焦**：双手进入画面时会高亮最近的照片，但不自动打开详情
 
+### 手势照片选择（v0.3.1 新增）
+
+v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
+
+1. **移动视角**：通过手势或鼠标旋转相机，让照片靠近屏幕中心准星。系统自动识别屏幕中心附近的照片作为候选，并显示弱金色高亮。
+2. **捏合手指打开**：有候选照片时，单手捏合拇指和食指并保持约 0.3 秒，即可直接打开该照片的 MemoryModal 查看详情。没有候选照片时捏合不做任何事。
+3. **Debug HUD**：摄像头预览下方显示 pinch 调试信息（candidate yes/no、pinchRatio、pinchDetected、hold time、cooldown、block reason）。后续可设置 `DEBUG_GESTURES = false` 隐藏。
+4. **鼠标点击仍然可用**：hover 发光，点击打开详情。
+5. **详情打开时**：手势导航和 pinch 选择都暂停。
+
 ## 🏗️ 技术栈
 
 - React 19 + TypeScript
@@ -80,8 +90,9 @@
 - **v0.2.3** ✅ Stellar Systems Polish：多恒星行星系统
 - **v0.2.4** ✅ Lighting Hierarchy Polish：光照层级优化
 - **v0.2.5** ✅ Photo Volume Distribution：照片体积分布优化（当前）
-- **v0.3** ✅ 拍立得照片可点击，展示时间和文字（当前）
-- **v0.3.1** Pinch 捏合打开当前聚焦照片
+- **v0.3** ✅ 拍立得照片可点击，展示时间和文字
+- **v0.3.1** ✅ 手势聚焦 + 捏合打开照片（当前，lite 模式无双手锁定）
+- **v0.3.2** 双手锁定 + pinch 完整流程
 - **v0.4** 新增时间隧道模式，先用按钮进入
 - **v0.5** 增加推手势进入时间隧道
 - **v0.6** 加纪念日终章、信件、音乐、分享
@@ -100,6 +111,7 @@
 - 小星球、水晶碎片、星尘光点装饰
 - 多恒星系统（Stellar Systems）
 - 拍立得照片可点击查看详情（v0.3）
+- 手势照片选择（v0.3.1）
 
 ---
 
@@ -154,6 +166,30 @@ v0.2.3 将零散天体升级为多个小型恒星系统：
 - **聚合/展开保持环绕关系**：FORMED ↔ CHAOS 转换时，行星跟随所属恒星一起移动，局部轨道关系维持。
 - **行星可见性提升**：行星材质 opacity 从 0.38 提升至 0.72，roughness 微调，使其在 Bloom 和星尘中更清晰可见。
 - **移除 ContactShadows**：消除地面错觉，让星云悬浮于深空。
+
+---
+
+## 🖐️ v0.3.1-lite Gesture Photo Selection
+
+v0.3.1-lite 简化了手势照片选择流程：去除了双手锁定步骤，改为"中心候选 + Pinch 直接打开"。用户移动视角让照片靠近中心准星，系统自动弱高亮候选照片。随后单手捏合拇指食指并保持约 300ms，即可直接打开 MemoryModal。
+
+**状态机：**
+
+```
+视角移动 → candidatePhoto（弱高亮）
+  ↓ 捏合保持 300ms
+selectedMemory（MemoryModal 打开，导航暂停）
+  ↓ Esc / X / 背景 / 握拳
+回到探索
+```
+
+**Pinch 优先级：** pinch 检测在 open/fist 之前运行，不受模式切换 cooldown 影响。只有 pinch 自身的 1000ms cooldown。pinch 进行中时会抑制 open/fist 的 rawGesture 分类，防止误触发模式切换。
+
+**中心候选算法：** 使用相机投影矩阵将 3D 世界坐标投影到屏幕归一化坐标，计算距中心距离 + 深度惩罚。阈值 CENTER_PICK_THRESHOLD = 0.4。
+
+**Pinch 检测：** `distance(thumb[4], index[8]) / distance(wrist[0], middleMCP[9]) < 0.5`；保持 300ms 触发；1000ms 冷却。
+
+**Debug HUD：** 摄像头预览下方显示 candidate yes/no、pinchRatio、pinchDetected、hold time、cooldown remaining、block reason。设置 `DEBUG_GESTURES = false` 可隐藏。
 
 ---
 

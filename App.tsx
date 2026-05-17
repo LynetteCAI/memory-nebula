@@ -1,5 +1,5 @@
 
-import React, { useState, Suspense, useEffect, useMemo } from 'react';
+import React, { useState, Suspense, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Loader } from '@react-three/drei';
 import { Experience } from './components/Experience';
@@ -56,11 +56,17 @@ export default function App() {
   
   // v0.3: Memory detail modal state
   const [selectedMemory, setSelectedMemory] = useState<MemoryPhoto | null>(null);
-  // v0.3: Photo focused by two-hand detection (highlight only, doesn't open modal)
+  // v0.3: (legacy) Photo focused by two-hand proximity
   const [focusedPhotoId, setFocusedPhotoId] = useState<string | null>(null);
+  
+  // v0.3.1: Gesture photo selection states
+  const [candidateMemory, setCandidateMemory] = useState<MemoryPhoto | null>(null);
+  const [lockedMemory, setLockedMemory] = useState<MemoryPhoto | null>(null);
 
-  // v0.3: Pause gesture navigation when modal is open
+  // v0.3 + v0.3.1: Pause navigation when modal is open
   const gestureNavigationEnabled = selectedMemory === null;
+  // v0.3.1: Enable gesture photo selection only when modal is NOT open
+  const gesturePhotoSelectionEnabled = selectedMemory === null;
 
   // v0.3: Derive MemoryPhoto[] from uploadedPhotos
   const memories = useMemo<MemoryPhoto[]>(() => {
@@ -68,6 +74,30 @@ export default function App() {
       normalizeUploadToMemoryPhoto(url, i, uploadedPhotos.length)
     );
   }, [uploadedPhotos]);
+
+  // v0.3.1: Clear locked photo when mode goes to FORMED (core collapsed)
+  const prevModeRef = useRef<TreeMode>(mode);
+  useEffect(() => {
+    if (mode === TreeMode.FORMED && prevModeRef.current === TreeMode.CHAOS) {
+      setLockedMemory(null);
+    }
+    prevModeRef.current = mode;
+  }, [mode]);
+
+  // v0.3.1: Esc key logic: close modal OR clear locked photo
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (selectedMemory) {
+          setSelectedMemory(null);
+        } else if (lockedMemory) {
+          setLockedMemory(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedMemory, lockedMemory]);
 
   // Check for share parameter in URL on mount
   useEffect(() => {
@@ -130,6 +160,29 @@ export default function App() {
     setFocusedPhotoId(id);
   };
 
+  // v0.3.1: Candidate photo update from screen-center detection
+  const handleCandidatePhotoChange = (photo: MemoryPhoto | null) => {
+    setCandidateMemory(photo);
+  };
+
+  // v0.3.1-lite: Ref for pinch callback to avoid stale closure
+  const candidateMemoryRef = useRef<MemoryPhoto | null>(null);
+  useEffect(() => {
+    candidateMemoryRef.current = candidateMemory;
+  }, [candidateMemory]);
+
+  // v0.3.1-lite: Two-hands lock (kept but unused in lite mode)
+  const handleLockPhotoGesture = useCallback(() => {
+    // v0.3.1-lite: no-op — two-hands lock is disabled
+  }, []);
+
+  // v0.3.1-lite: Pinch hold → open current candidate directly
+  const handlePinchConfirm = useCallback(() => {
+    const memory = candidateMemoryRef.current;
+    if (!memory) return;
+    setSelectedMemory(memory);
+  }, []);
+
   const handlePhotosUpload = (photos: string[]) => {
     setUploadedPhotos(photos);
   };
@@ -153,6 +206,10 @@ export default function App() {
               focusedPhotoId={focusedPhotoId}
               onPhotoSelect={setSelectedMemory}
               onFocusedPhotoIdChange={handleFocusedPhotoIdChange}
+              candidatePhotoId={candidateMemory?.id ?? null}
+              onCandidatePhotoChange={handleCandidatePhotoChange}
+              lockedPhotoId={lockedMemory?.id ?? null}
+              pauseSelection={selectedMemory !== null}
             />
           </Suspense>
         </Canvas>
@@ -183,13 +240,17 @@ export default function App() {
         </div>
       )}
       
-      {/* Gesture Control Module — v0.3: navigation paused when modal is open */}
+      {/* Gesture Control Module — v0.3.1: navigation + photo selection gestures */}
       <GestureController
         currentMode={mode}
         onModeChange={setMode}
         onHandPosition={handleHandPosition}
         onTwoHandsDetected={handleTwoHandsDetected}
         gestureNavigationEnabled={gestureNavigationEnabled}
+        gesturePhotoSelectionEnabled={gesturePhotoSelectionEnabled}
+        hasCandidatePhoto={candidateMemory !== null}
+        onLockPhotoGesture={handleLockPhotoGesture}
+        onPinchConfirm={handlePinchConfirm}
       />
       
       {/* v0.3: Memory Detail Modal — replaces old two-hand photo overlay */}
@@ -198,13 +259,28 @@ export default function App() {
         onClose={() => setSelectedMemory(null)}
       />
       
-      {/* v0.3: Small hint when two hands are focusing a photo */}
-      {twoHandsDetected && focusedPhotoId && !selectedMemory && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-fade-in">
-          <div className="bg-black/60 backdrop-blur-sm border border-[#D4AF37]/30 rounded-full px-5 py-2">
-            <p className="text-[#D4AF37]/80 font-serif text-sm tracking-wide">
-              已聚焦一段回忆，点击照片查看详情
-            </p>
+      {/* v0.3.1-lite: Gesture photo selection status hint */}
+      {!selectedMemory && uploadedPhotos.length > 0 && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity duration-300">
+          <div className="bg-black/50 backdrop-blur-sm border border-[#D4AF37]/20 rounded-full px-5 py-2">
+            {candidateMemory ? (
+              <p className="text-[#D4AF37]/70 font-serif text-sm tracking-wide text-center">
+                捏合手指，打开这段回忆
+              </p>
+            ) : (
+              <p className="text-[#D4AF37]/50 font-serif text-xs tracking-wide text-center">
+                移动视角 · 让照片靠近中心
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* v0.3.1: Center crosshair (subtle, only in CHAOS with photos, not during modal) */}
+      {mode === TreeMode.CHAOS && uploadedPhotos.length > 0 && !selectedMemory && (
+        <div className="fixed inset-0 z-10 pointer-events-none flex items-center justify-center">
+          <div className="w-8 h-8 rounded-full border border-[#D4AF37]/15 flex items-center justify-center">
+            <div className="w-1 h-1 rounded-full bg-[#D4AF37]/25" />
           </div>
         </div>
       )}

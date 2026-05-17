@@ -17,12 +17,20 @@ interface ExperienceProps {
   twoHandsDetected: boolean;
   /** v0.3: MemoryPhoto objects for click-to-open */
   memories?: MemoryPhoto[];
-  /** v0.3: Called when a polaroid is clicked to open the modal */
+  /** v0.3/v0.3.1: Called when a polaroid is clicked to open the modal */
   onPhotoSelect?: (photo: MemoryPhoto) => void;
-  /** v0.3: ID of the photo focused by two-hand detection (for highlight) */
+  /** v0.3: ID of the photo focused by two-hand detection (legacy) */
   focusedPhotoId?: string | null;
-  /** v0.3: Two-hand focus updates this callback with the focused memory ID */
+  /** v0.3: Two-hand focus updates this callback (legacy) */
   onFocusedPhotoIdChange?: (id: string | null) => void;
+  /** v0.3.1: ID of the screen-center candidate photo */
+  candidatePhotoId?: string | null;
+  /** v0.3.1: Called when candidate photo changes */
+  onCandidatePhotoChange?: (photo: MemoryPhoto | null) => void;
+  /** v0.3.1: ID of the gesture-locked photo */
+  lockedPhotoId?: string | null;
+  /** v0.3.1: Pause candidate updates when modal is open */
+  pauseSelection?: boolean;
 }
 
 export const Experience: React.FC<ExperienceProps> = ({
@@ -34,6 +42,10 @@ export const Experience: React.FC<ExperienceProps> = ({
   onPhotoSelect,
   focusedPhotoId,
   onFocusedPhotoIdChange,
+  candidatePhotoId,
+  onCandidatePhotoChange,
+  lockedPhotoId,
+  pauseSelection,
 }) => {
   const controlsRef = useRef<any>(null);
 
@@ -127,6 +139,10 @@ export const Experience: React.FC<ExperienceProps> = ({
           onPhotoSelect={onPhotoSelect}
           focusedPhotoId={focusedPhotoId}
           onFocusedPhotoIdChange={onFocusedPhotoIdChange}
+          candidatePhotoId={candidatePhotoId}
+          onCandidatePhotoChange={onCandidatePhotoChange}
+          lockedPhotoId={lockedPhotoId}
+          pauseSelection={pauseSelection}
         />
         {/* <TreeStar mode={mode} /> */}
       </group>

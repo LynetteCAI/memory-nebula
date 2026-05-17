@@ -8,6 +8,15 @@ import { getNebulaPhotoPosition, getNebulaPhotoScale } from '../utils/nebulaLayo
 import { getConstellationPhotoPosition, getConstellationPhotoScale } from '../utils/constellationLayout';
 
 // ---------------------------------------------------------------------------
+//  v0.3.1 Constants
+// ---------------------------------------------------------------------------
+
+/** Screen-center threshold: max normalized screen distance to qualify as candidate */
+const CENTER_PICK_THRESHOLD = 0.4;
+/** Depth penalty weight in candidate scoring (keeps nearer photos preferred) */
+const DEPTH_PENALTY_WEIGHT = 0.05;
+
+// ---------------------------------------------------------------------------
 //  Interfaces
 // ---------------------------------------------------------------------------
 
@@ -18,12 +27,20 @@ interface PolaroidsProps {
   onClosestPhotoChange?: (photoUrl: string | null) => void;
   /** v0.3: MemoryPhoto objects (map 1:1 to uploadedPhotos) for click-to-open */
   memories?: MemoryPhoto[];
-  /** v0.3: Called when a polaroid is clicked */
+  /** v0.3/v0.3.1: Called when a polaroid is clicked (mouse) */
   onPhotoSelect?: (photo: MemoryPhoto) => void;
-  /** v0.3: ID of the photo currently focused by two-hand detection */
+  /** v0.3: (legacy) ID of the photo focused by two-hand proximity (retained compat) */
   focusedPhotoId?: string | null;
-  /** v0.3: ID of the photo closest to camera (for internal two-hand tracking) */
+  /** v0.3: (legacy) two-hand proximity focus callback (retained compat) */
   onFocusedPhotoIdChange?: (id: string | null) => void;
+  /** v0.3.1: ID of the screen-center candidate photo */
+  candidatePhotoId?: string | null;
+  /** v0.3.1: Called with new candidate when screen-center photo changes */
+  onCandidatePhotoChange?: (photo: MemoryPhoto | null) => void;
+  /** v0.3.1: ID of the gesture-locked photo (strong highlight) */
+  lockedPhotoId?: string | null;
+  /** v0.3.1: Pause candidate updates (e.g. when modal is open) */
+  pauseSelection?: boolean;
 }
 
 interface PhotoData {
@@ -40,8 +57,12 @@ interface PolaroidItemProps {
   data: PhotoData;
   mode: TreeMode;
   index: number;
-  isFocused: boolean;
-  /** v0.3: Click handler — receives the photo index */
+  isCandidate: boolean;
+  isLocked: boolean;
+  isHovered: boolean;
+  /** v0.3.1: mouse enter/leave + click */
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
   onClick?: (e: ThreeEvent<MouseEvent>) => void;
 }
 
@@ -49,13 +70,15 @@ interface PolaroidItemProps {
 //  PolaroidItem — individual 3D polaroid frame
 // ---------------------------------------------------------------------------
 
-const PolaroidItem: React.FC<PolaroidItemProps> = ({ data, mode, index, isFocused, onClick }) => {
+const PolaroidItem: React.FC<PolaroidItemProps> = ({
+  data, mode, index,
+  isCandidate, isLocked, isHovered,
+  onPointerEnter, onPointerLeave, onClick,
+}) => {
   const groupRef = useRef<THREE.Group>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const [error, setError] = useState(false);
-  const [hovered, setHovered] = useState(false);
 
-  // Safe texture loading that won't crash the app if a file is missing
   useEffect(() => {
     const loader = new THREE.TextureLoader();
     loader.load(
@@ -75,13 +98,15 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({ data, mode, index, isFocuse
   
   const swayOffset = useMemo(() => Math.random() * 100, []);
 
-  // v0.2.5: dynamic scale — lerp between formed & chaos scale
-  // v0.3: add hover boost
+  // v0.3.1: Highlight priority: locked(3) > hovered(2) > candidate(1) > none(0)
+  const highlightLevel = isLocked ? 3 : isHovered ? 2 : isCandidate ? 1 : 0;
+
   const scaleRef = useRef(1);
-  useFrame(() => {
+  useFrame((state) => {
     const baseTarget = mode === TreeMode.FORMED ? data.formedScale : data.chaosScale;
-    const hoverBoost = hovered ? 1.08 : 1.0;
-    scaleRef.current = THREE.MathUtils.lerp(scaleRef.current, baseTarget * hoverBoost, 0.08);
+    const boost = highlightLevel >= 3 ? 1.08 : highlightLevel >= 2 ? 1.05 : highlightLevel === 1 ? 1.05 : 1.0;
+    const pulse = highlightLevel >= 2 ? 1 + Math.sin(state.clock.elapsedTime * 3) * 0.02 : highlightLevel === 1 ? 1 + Math.sin(state.clock.elapsedTime * 2) * 0.012 : 1;
+    scaleRef.current = THREE.MathUtils.lerp(scaleRef.current, baseTarget * boost * pulse, 0.08);
   });
 
   useFrame((state, delta) => {
@@ -90,16 +115,13 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({ data, mode, index, isFocuse
     const isFormed = mode === TreeMode.FORMED;
     const time = state.clock.elapsedTime;
     
-    // 1. Position Interpolation
     const targetPos = isFormed ? data.targetPos : data.chaosPos;
     const step = delta * data.speed;
     groupRef.current.position.lerp(targetPos, step);
 
-    // 2. Scale
     const s = scaleRef.current;
     groupRef.current.scale.setScalar(s);
 
-    // 3. Rotation & Sway Logic
     if (isFormed) {
         const dummy = new THREE.Object3D();
         dummy.position.copy(groupRef.current.position);
@@ -126,15 +148,15 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({ data, mode, index, isFocuse
     }
   });
 
-  // v0.3: cursor styles via drei useCursor-like approach via DOM
   useEffect(() => {
-    if (hovered) {
-      document.body.style.cursor = 'pointer';
-    }
-    return () => {
-      document.body.style.cursor = '';
-    };
-  }, [hovered]);
+    if (isHovered) document.body.style.cursor = 'pointer';
+    return () => { document.body.style.cursor = ''; };
+  }, [isHovered]);
+
+  const emissiveIntensity =
+    highlightLevel >= 3 ? 0.35 :
+    highlightLevel >= 2 ? 0.20 :
+    highlightLevel === 1 ? 0.18 : 0;
 
   return (
     <group ref={groupRef}>
@@ -142,39 +164,39 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({ data, mode, index, isFocuse
       {/* Orbital tether */}
       <mesh position={[0, 0.5, -0.1]}>
         <cylinderGeometry args={[0.003, 0.003, 0.8]} />
-        <meshStandardMaterial color="#D4AF37" metalness={1} roughness={0.2} transparent opacity={0.4} />
+        <meshStandardMaterial
+          color="#D4AF37" metalness={1} roughness={0.2} transparent
+          opacity={highlightLevel >= 3 ? 0.7 : highlightLevel >= 2 ? 0.6 : highlightLevel === 1 ? 0.5 : 0.4}
+        />
       </mesh>
 
       {/* Frame Group */}
       <group position={[0, 0, 0]}>
-        {/* v0.3: White frame with hover + focus effects */}
         <mesh
           position={[0, 0, 0]}
-          onPointerEnter={() => setHovered(true)}
-          onPointerLeave={() => setHovered(false)}
+          onPointerEnter={onPointerEnter}
+          onPointerLeave={onPointerLeave}
           onClick={onClick}
         >
           <boxGeometry args={[1.2, 1.5, 0.02]} />
           <meshStandardMaterial
-            color={isFocused ? "#fffef5" : "#fdfdfd"}
+            color={highlightLevel >= 3 ? "#fffef0" : highlightLevel >= 1 ? "#fffef5" : "#fdfdfd"}
             roughness={0.8}
-            emissive={isFocused ? "#D4AF37" : hovered ? "#D4AF37" : "#000000"}
-            emissiveIntensity={isFocused ? 0.25 : hovered ? 0.12 : 0}
+            emissive="#D4AF37"
+            emissiveIntensity={emissiveIntensity}
           />
         </mesh>
 
-        {/* v0.3: Clickable transparent plane in front for reliable hit detection */}
         <mesh
           position={[0, 0.15, 0.035]}
-          onPointerEnter={() => setHovered(true)}
-          onPointerLeave={() => setHovered(false)}
+          onPointerEnter={onPointerEnter}
+          onPointerLeave={onPointerLeave}
           onClick={onClick}
         >
           <planeGeometry args={[1.0, 1.0]} />
           <meshBasicMaterial transparent opacity={0} depthTest={false} />
         </mesh>
 
-        {/* Photo texture */}
         <mesh position={[0, 0.15, 0.025]}>
           <planeGeometry args={[1.0, 1.0]} />
           {texture && !error ? (
@@ -184,17 +206,28 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({ data, mode, index, isFocuse
           )}
         </mesh>
 
-        {/* Gold clip */}
         <mesh position={[0, 0.7, 0.025]} rotation={[0,0,0]}>
            <boxGeometry args={[0.1, 0.05, 0.05]} />
            <meshStandardMaterial color="#D4AF37" metalness={1} roughness={0.2} />
         </mesh>
 
-        {/* v0.3: Focused glow ring (visible when focused) */}
-        {isFocused && (
+        {/* v0.3.1: Highlight ring — visible for candidate+ (level >= 1) */}
+        {highlightLevel >= 1 && (
           <mesh position={[0, 0, 0.025]}>
-            <ringGeometry args={[0.62, 0.65, 64]} />
-            <meshBasicMaterial color="#D4AF37" transparent opacity={0.6} side={THREE.DoubleSide} />
+            <ringGeometry args={[0.63, 0.66, 64]} />
+            <meshBasicMaterial
+              color="#D4AF37" transparent
+              opacity={highlightLevel >= 3 ? 0.75 : highlightLevel >= 2 ? 0.45 : 0.30}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        )}
+
+        {/* v0.3.1: Locked outer halo */}
+        {highlightLevel >= 3 && (
+          <mesh position={[0, 0, 0.03]}>
+            <ringGeometry args={[0.68, 0.72, 64]} />
+            <meshBasicMaterial color="#E8C860" transparent opacity={0.4} side={THREE.DoubleSide} />
           </mesh>
         )}
 
@@ -221,22 +254,30 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
   onPhotoSelect,
   focusedPhotoId,
   onFocusedPhotoIdChange,
+  candidatePhotoId,
+  onCandidatePhotoChange,
+  lockedPhotoId,
+  pauseSelection,
 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const [closestPhotoIndex, setClosestPhotoIndex] = React.useState<number>(0);
+  // Track hover per photo index
+  const hoverRef = useRef<boolean[]>([]);
+  const [, setHoverTick] = useState(0);
+  const setHovered = useCallback((i: number, v: boolean) => {
+    hoverRef.current[i] = v;
+    setHoverTick(t => t + 1); // trigger re-render
+  }, []);
 
   const photoData = useMemo(() => {
     if (uploadedPhotos.length === 0) return [];
-
     const data: PhotoData[] = [];
     const count = uploadedPhotos.length;
-
     for (let i = 0; i < count; i++) {
       const targetPos = getNebulaPhotoPosition(i, count);
       const chaosPos = getConstellationPhotoPosition(i, count);
       const formedScale = getNebulaPhotoScale(i, count);
       const chaosScale = getConstellationPhotoScale(i, count);
-
       data.push({
         id: i,
         url: uploadedPhotos[i],
@@ -250,7 +291,6 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
     return data;
   }, [uploadedPhotos]);
 
-  // v0.3: Build click handler for a given photo index
   const handlePhotoClick = useCallback(
     (index: number) => (e: ThreeEvent<MouseEvent>) => {
       e.stopPropagation();
@@ -261,10 +301,78 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
     [memories, onPhotoSelect]
   );
 
-  // Update closest photo when two hands detected (no longer opens overlay)
+  // ---------------------------------------------------------------------------
+  // v0.3.1: Screen-center candidate detection (replaces closest-to-camera)
+  // ---------------------------------------------------------------------------
+  const candidateRef = useRef<string | null>(null);
+  const lastCandidateRef = useRef<string | null>(null);
+
   useFrame((state) => {
-    if (twoHandsDetected && groupRef.current && photoData.length > 0) {
-      const cameraPos = state.camera.position.clone();
+    if (pauseSelection || !groupRef.current || photoData.length === 0) return;
+
+    // --- Screen-center projection for candidate ---
+    const camera = state.camera;
+    const frustum = new THREE.Frustum();
+    const projScreenMatrix = new THREE.Matrix4();
+    projScreenMatrix.multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse
+    );
+    frustum.setFromProjectionMatrix(projScreenMatrix);
+
+    let bestScore = Infinity;
+    let bestIndex = -1;
+
+    groupRef.current.children.forEach((child, i) => {
+      if (i >= photoData.length) return;
+
+      const worldPos = new THREE.Vector3();
+      child.getWorldPosition(worldPos);
+
+      // Skip photos behind camera or outside frustum
+      if (!frustum.containsPoint(worldPos)) return;
+
+      const projected = worldPos.clone().project(camera);
+
+      // Clip-space check: valid range
+      if (projected.z < -1 || projected.z > 1) return;
+
+      const dx = projected.x; // 0 = screen center horizontal
+      const dy = projected.y; // 0 = screen center vertical
+      const distanceToCenter = Math.sqrt(dx * dx + dy * dy);
+
+      if (distanceToCenter > CENTER_PICK_THRESHOLD) return;
+
+      // Score: center distance + slight depth penalty
+      const depthPenalty = Math.max(0, projected.z) * DEPTH_PENALTY_WEIGHT;
+      const score = distanceToCenter + depthPenalty;
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    });
+
+    // Candidate found
+    if (bestIndex >= 0 && memories && memories[bestIndex]) {
+      candidateRef.current = memories[bestIndex].id;
+    } else {
+      candidateRef.current = null;
+    }
+
+    // Only fire callback if candidate changed
+    if (candidateRef.current !== lastCandidateRef.current) {
+      lastCandidateRef.current = candidateRef.current;
+      if (onCandidatePhotoChange) {
+        const mem =
+          bestIndex >= 0 && memories && memories[bestIndex] ? memories[bestIndex] : null;
+        onCandidatePhotoChange(mem);
+      }
+    }
+
+    // --- Legacy two-hand closest-to-camera (kept for backward compat) ---
+    if (twoHandsDetected) {
+      const cameraPos = camera.position.clone();
       let minDistance = Infinity;
       let closestIndex = 0;
 
@@ -282,43 +390,40 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
 
       setClosestPhotoIndex(closestIndex);
 
-      // v0.3: Notify parent of focused photo ID (for highlight, NOT for opening modal)
       if (memories && memories[closestIndex] && onFocusedPhotoIdChange) {
         onFocusedPhotoIdChange(memories[closestIndex].id);
       }
-
-      // Keep legacy callback for backward compatibility (no longer used for overlay)
       if (onClosestPhotoChange) {
         onClosestPhotoChange(uploadedPhotos[closestIndex]);
       }
     } else {
-      // Hands not detected — clear focus
-      if (onFocusedPhotoIdChange) {
-        onFocusedPhotoIdChange(null);
-      }
-      if (onClosestPhotoChange) {
-        onClosestPhotoChange(null);
-      }
+      if (onFocusedPhotoIdChange) onFocusedPhotoIdChange(null);
+      if (onClosestPhotoChange) onClosestPhotoChange(null);
     }
   });
 
+  // Which ID to use for "is focused" (legacy focusedPhotoId compat)
+  const effectiveFocusedId = focusedPhotoId;
+
   return (
     <group ref={groupRef}>
-      {photoData.map((data, i) => (
-        <PolaroidItem
-          key={i}
-          index={i}
-          data={data}
-          mode={mode}
-          isFocused={
-            focusedPhotoId != null &&
-            memories != null &&
-            memories[i] != null &&
-            memories[i].id === focusedPhotoId
-          }
-          onClick={memories && onPhotoSelect ? handlePhotoClick(i) : undefined}
-        />
-      ))}
+      {photoData.map((data, i) => {
+        const memId = memories?.[i]?.id;
+        return (
+          <PolaroidItem
+            key={i}
+            index={i}
+            data={data}
+            mode={mode}
+            isCandidate={memId != null && memId === candidatePhotoId}
+            isLocked={memId != null && memId === lockedPhotoId}
+            isHovered={!!hoverRef.current[i]}
+            onPointerEnter={() => setHovered(i, true)}
+            onPointerLeave={() => setHovered(i, false)}
+            onClick={memories && onPhotoSelect ? handlePhotoClick(i) : undefined}
+          />
+        );
+      })}
     </group>
   );
 };
