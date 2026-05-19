@@ -117,6 +117,100 @@ function GlassInput({
   );
 }
 
+/**
+ * v0.3.5: Split date input — year/month/day fields with auto-advance.
+ * Parses YYYY-MM-DD string, renders three compact inputs,
+ * auto-focuses next field when max length is reached,
+ * and combines back into YYYY-MM-DD format.
+ */
+function SplitDateInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  // Parse current value parts — computed fresh on each render
+  const parse = () => {
+    const p = value ? value.split('-') : [];
+    return { y: p[0] || '', m: p[1] || '', d: p[2] || '' };
+  };
+  const { y: year, m: month, d: day } = parse();
+
+  const yearRef = useRef<HTMLInputElement>(null);
+  const monthRef = useRef<HTMLInputElement>(null);
+  const dayRef = useRef<HTMLInputElement>(null);
+
+  const handleYearChange = (v: string) => {
+    const digits = v.replace(/\D/g, '').slice(0, 4);
+    const { m, d } = parse();
+    const newDate = `${digits}-${m}-${d}`;
+    onChange(newDate);
+    if (digits.length === 4) monthRef.current?.focus();
+  };
+
+  const handleMonthChange = (v: string) => {
+    const digits = v.replace(/\D/g, '').slice(0, 2);
+    const { y, d } = parse();
+    const newDate = `${y}-${digits}-${d}`;
+    onChange(newDate);
+    if (digits.length === 2) dayRef.current?.focus();
+  };
+
+  const handleDayChange = (v: string) => {
+    const digits = v.replace(/\D/g, '').slice(0, 2);
+    const { y, m } = parse();
+    const newDate = `${y}-${m}-${digits}`;
+    onChange(newDate);
+  };
+
+  const inputBase =
+    'w-full bg-black/40 border border-[#D4AF37]/20 rounded px-2 py-2 text-[#F5E6BF] text-sm font-serif text-center focus:outline-none focus:border-[#D4AF37]/50 transition-colors';
+
+  return (
+    <div className="flex-1 min-w-0">
+      <label className="block text-[#D4AF37]/70 text-xs font-serif mb-1 tracking-wide">日期</label>
+      <div className="flex items-center gap-1">
+        <input
+          ref={yearRef}
+          className={inputBase}
+          type="text"
+          inputMode="numeric"
+          value={year}
+          onChange={(e) => handleYearChange(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          placeholder="年"
+          maxLength={4}
+        />
+        <span className="text-[#D4AF37]/40 text-sm">/</span>
+        <input
+          ref={monthRef}
+          className={inputBase}
+          type="text"
+          inputMode="numeric"
+          value={month}
+          onChange={(e) => handleMonthChange(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          placeholder="月"
+          maxLength={2}
+        />
+        <span className="text-[#D4AF37]/40 text-sm">/</span>
+        <input
+          ref={dayRef}
+          className={inputBase}
+          type="text"
+          inputMode="numeric"
+          value={day}
+          onChange={(e) => handleDayChange(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          placeholder="日"
+          maxLength={2}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 //  Main Component
 // ---------------------------------------------------------------------------
@@ -550,9 +644,7 @@ export const MemoryManager: React.FC<MemoryManagerProps> = ({
                         }
                         placeholder="回忆标题"
                       />
-                      <GlassInput
-                        label="日期"
-                        type="date"
+                      <SplitDateInput
                         value={draft.date}
                         onChange={(v) =>
                           setDrafts((prev) => prev.map((d, idx) => (idx === i ? { ...d, date: v } : d)))
