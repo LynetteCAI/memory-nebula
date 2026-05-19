@@ -306,7 +306,7 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
         url: uploadedPhotos[i],
         chaosPos,
         targetPos,
-        speed: 0.8 + Math.random() * 1.5,
+        speed: 0.3 + Math.random() * 0.4,
         formedScale,
         chaosScale,
         opacity: isChrono ? getChronoStreamPhotoOpacity(i, focusIndex, count) : 1,

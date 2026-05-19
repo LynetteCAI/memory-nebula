@@ -5,6 +5,7 @@ import { Loader } from '@react-three/drei';
 import { Experience } from './components/Experience';
 import { UIOverlay } from './components/UIOverlay';
 import { GestureController } from './components/GestureController';
+import type { TwoHandTransitionDebugState } from './components/GestureController';
 import { MemoryModal } from './components/MemoryModal';
 import { MemoryManager } from './components/MemoryManager';
 import { TreeMode, MemoryPhoto } from './types';
@@ -82,6 +83,9 @@ export default function App() {
 
   // v0.4: Chrono Stream state
   const [focusIndex, setFocusIndex] = useState(0);
+
+  // v0.5: Two-hand transition debug state from GestureController
+  const [twoHandTransitionState, setTwoHandTransitionState] = useState<TwoHandTransitionDebugState | null>(null);
 
   // v0.4.5: Session-level shuffle seed — generated once per page load
   const nebulaShuffleSeedRef = useRef(Date.now());
@@ -470,7 +474,7 @@ export default function App() {
         </div>
       )}
       
-      {/* Gesture Control Module — v0.3.2: modal close gesture, v0.4.4: chrono gestures */}
+      {/* Gesture Control Module — v0.3.2: modal close gesture, v0.4.4: chrono gestures, v0.5: two-hand transition */}
       <GestureController
         currentMode={mode}
         onModeChange={setMode}
@@ -494,6 +498,11 @@ export default function App() {
         onChronoSwipeLeft={goPrevMemory}
         onChronoSwipeRight={goNextMemory}
         onChronoPinchOpen={handleChronoPinchOpen}
+        // v0.5: Two-Hand Chrono Transition
+        onEnterChronoGesture={enterChronoStream}
+        onExitChronoGesture={exitChronoStream}
+        chronoTransitionGestureEnabled={selectedMemory === null}
+        onTwoHandTransitionStateChange={setTwoHandTransitionState}
       />
       
       {/* v0.3: Memory Detail Modal — replaces old two-hand photo overlay */}
@@ -532,12 +541,52 @@ export default function App() {
         </div>
       )}
 
+      {/* v0.5: Two-hand spread progress hint (CHAOS, two hands detected) */}
+      {!selectedMemory && memories.length > 0 && mode === TreeMode.CHAOS && twoHandTransitionState?.twoHandsDetected && twoHandTransitionState.kind === 'spread' && (
+        <div className="fixed bottom-36 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity duration-300">
+          <div className="bg-black/60 backdrop-blur-md border border-[#D4AF37]/30 rounded-lg px-6 py-3">
+            <p className="text-[#D4AF37]/80 font-serif text-sm tracking-wider text-center mb-2">
+              展开双手，整理成时间流
+            </p>
+            <div className="w-40 h-1 bg-[#D4AF37]/15 rounded-full overflow-hidden mx-auto">
+              <div
+                className="h-full bg-gradient-to-r from-[#D4AF37]/40 via-[#E8C860] to-[#D4AF37]/40 rounded-full transition-all duration-100"
+                style={{ width: `${Math.round(twoHandTransitionState.progress * 100)}%` }}
+              />
+            </div>
+            <p className="text-[#D4AF37]/30 font-serif text-[9px] tracking-wider text-center mt-1">
+              {Math.round(twoHandTransitionState.progress * 100)}%
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* v0.4.4: Chrono Stream gesture hints */}
       {!selectedMemory && memories.length > 0 && mode === TreeMode.CHRONO_STREAM && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity duration-300">
           <div className="bg-black/50 backdrop-blur-sm border border-[#D4AF37]/20 rounded-full px-5 py-2">
             <p className="text-[#D4AF37]/70 font-serif text-sm tracking-wide text-center">
               左右挥手切换回忆 · 捏合打开当前照片
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* v0.5: Two-hand gather progress hint (CHRONO_STREAM, two hands detected) */}
+      {!selectedMemory && memories.length > 0 && mode === TreeMode.CHRONO_STREAM && twoHandTransitionState?.twoHandsDetected && twoHandTransitionState.kind === 'gather' && (
+        <div className="fixed bottom-44 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity duration-300">
+          <div className="bg-black/60 backdrop-blur-md border border-[#D4AF37]/30 rounded-lg px-6 py-3">
+            <p className="text-[#D4AF37]/80 font-serif text-sm tracking-wider text-center mb-2">
+              合拢双手，回到记忆星云
+            </p>
+            <div className="w-40 h-1 bg-[#D4AF37]/15 rounded-full overflow-hidden mx-auto">
+              <div
+                className="h-full bg-gradient-to-r from-[#D4AF37]/40 via-[#E8C860] to-[#D4AF37]/40 rounded-full transition-all duration-100"
+                style={{ width: `${Math.round(twoHandTransitionState.progress * 100)}%` }}
+              />
+            </div>
+            <p className="text-[#D4AF37]/30 font-serif text-[9px] tracking-wider text-center mt-1">
+              {Math.round(twoHandTransitionState.progress * 100)}%
             </p>
           </div>
         </div>
