@@ -4,7 +4,7 @@
 
 ## 📝 版本
 
-**v0.5.3**：Nebula Hand Orbit Control Polish — 星云手势轨迹球视角控制（当前）。
+**v0.5.5**：Stable Polaroid Identity & Deferred Chrono Transition — 稳定照片身份与延迟时间流过渡（当前）。
 
 ## 🛠️ 快速开始
 
@@ -111,7 +111,37 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - **v0.4.5** ✅ 星云交互与照片布局优化：soft dead zone、视角灵敏度、照片收紧、session shuffle
 - **v0.5** ✅ Two-Hand Chrono Transition：双手展开进入时间流，双手合拢回到星云
 - **v0.5.3** ✅ Nebula Hand Orbit Control Polish：星云手势轨迹球视角控制
+- **v0.5.4** ✅ Chrono Transition Smoothing：星云与时间流切换平滑化
+- **v0.5.5** ✅ Stable Polaroid Identity & Deferred Chrono Transition：稳定照片身份与延迟时间流过渡
 - **v0.6** ⏳ 纪念日终章、信件、音乐、分享
+
+## 🖐️ v0.5.5 Stable Polaroid Identity & Deferred Chrono Transition
+
+v0.5.5 优化了星云与时间流切换时的性能和视觉平滑度。此前进入时间流时，应用会在 `nebulaMemories` 和 `chronoMemories` 两个数组之间整批切换，导致大量照片组件的 url、metadata 和纹理在同一帧发生变化。本版本改为稳定照片身份模型：`Polaroids` 始终渲染同一份 `memories`，每张照片通过 `memory.id` 查询星云模式和时间流模式下的 visual index。这样照片不会换身份，只会移动到新布局位置。同时，模式切换加入 staggered transition，并在时间流中只显示 focus 附近的照片，从而减少大量照片时的瞬时压力。
+
+### 核心改进
+
+- **稳定照片身份**：`Polaroids` 不再在 `nebulaMemories` 和 `chronoMemories` 之间切换，始终渲染完整的 `memories` 数组
+- **React key 使用 memory.id**：每张照片的组件身份稳定，切换模式时不会大量 unmount/remount
+- **Order Map 解耦布局与身份**：新增 `nebulaOrderById` 和 `chronoOrderById` 两个 `Record<string, number>`，每张照片根据 `memory.id` 查询自己在当前模式下的 visual index
+- **星云模式**：使用 session shuffle 后的 nebulaIndex 计算星座/聚合位置
+- **时间流模式**：使用 date 排序后的 chronoIndex 计算时间流位置
+- **动态 Chrono 位置计算**：`PolaroidItem` 每帧根据 `chronoIndex` 和 `focusIndex` 计算目标位置，避免 `focusIndex` 变化时全量重建 `photoData`
+- **Staggered Transition**：每张照片根据 `hash01(memory.id)` 获得 0~180ms 的确定性延迟，模式切换时照片分批移动，避免所有照片同一帧高速冲向新位置
+- **时间流可见范围**：`CHRONO_VISIBLE_RANGE = 16`，`CHRONO_FADE_RANGE = 24`，focus 范围外的照片自动隐藏，大幅降低大量照片时的绘制压力
+- **纹理稳定**：`PolaroidItem` 的 `url` 始终来自 `memory.url`，不再因 `displayUrls` 顺序变化造成纹理重载
+
+### 技术细节
+
+- 移除 `App.tsx` 中的 `displayMemories`/`displayUrls`/`memoryUrls` 模式切换逻辑
+- 新增 `nebulaOrderById` 和 `chronoOrderById` 两个 `useMemo`，分别基于 `nebulaMemories` 和 `chronoMemories` 构建
+- `PhotoData` 简化：移除 `chronoPos`/`chronoScale`/`chronoOpacity`，改为每帧动态计算
+- `PhotoData` 新增 `nebulaIndex`、`chronoIndex`、`transitionDelay`
+- `PolaroidItem` 新增 `focusIndex` 和 `total` props，用于动态计算 chrono 布局
+- 使用 `prevModeRef` + `modeTransitionStartedAtRef` 检测模式变化，应用 stagger delay
+- 使用 `hash01` 确定性哈希函数生成 0~180ms 的过渡延迟
+- 时间流中 `chronoDistance > CHRONO_FADE_RANGE` 时设置 `group.visible = false`
+- 退出时间流时（非 CHRONO_STREAM 模式）自动恢复全部 visible
 
 ## 🖐️ v0.5.3 Nebula Hand Orbit Control Polish
 

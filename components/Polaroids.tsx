@@ -68,18 +68,26 @@ interface PolaroidsProps {
   pauseSelection?: boolean;
   /** v0.4: Current focus index for Chrono Stream time river */
   focusIndex?: number;
+  /** v0.5.5: Nebula order map — session-shuffled index by memory id */
+  nebulaOrderById?: Record<string, number>;
+  /** v0.5.5: Chrono order map — date-sorted index by memory id */
+  chronoOrderById?: Record<string, number>;
 }
 
+// v0.5.5: Simplified PhotoData — no chrono-specific pre-computed fields
+// Chrono positions are calculated per-item in PolaroidItem to avoid
+// full recomputation on every focusIndex change.
 interface PhotoData {
   id: number;
   url: string;
-  chaosPos: THREE.Vector3;
-  targetPos: THREE.Vector3;
+  constellationPos: THREE.Vector3;
+  nebulaPos: THREE.Vector3;
   speed: number;
-  formedScale: number;
-  chaosScale: number;
-  /** v0.4: Opacity for Chrono Stream time river layering */
-  opacity: number;
+  constellationScale: number;
+  nebulaScale: number;
+  nebulaIndex: number;
+  chronoIndex: number;
+  transitionDelay: number;
 }
 
 interface PolaroidItemProps {
@@ -93,6 +101,22 @@ interface PolaroidItemProps {
   onPointerEnter?: () => void;
   onPointerLeave?: () => void;
   onClick?: (e: ThreeEvent<MouseEvent>) => void;
+  // v0.5.5: Per-item chrono indices for stable identity rendering
+  focusIndex: number;
+  total: number;
+}
+
+// ---------------------------------------------------------------------------
+// v0.5.5: Deterministic hash function for stagger delays
+// ---------------------------------------------------------------------------
+
+function hash01(id: string, seed = 123): number {
+  let h = seed;
+  for (let i = 0; i < id.length; i++) {
+    h = Math.imul(31, h) + id.charCodeAt(i) | 0;
+  }
+  const x = Math.sin(h * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +127,7 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
   data, mode, index,
   isCandidate, isLocked, isHovered,
   onPointerEnter, onPointerLeave, onClick,
+  focusIndex, total,
 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
@@ -133,11 +158,25 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
   // v0.3.1: Highlight priority: locked(3) > hovered(2) > candidate(1) > none(0)
   const highlightLevel = isLocked ? 3 : isHovered ? 2 : isCandidate ? 1 : 0;
 
+  // v0.5.5: Refs for mode transition stagger
+  const prevModeRef = useRef<TreeMode>(mode);
+  const modeTransitionStartedAtRef = useRef<number | null>(null);
+  const isChronoRef = useRef(false);
+
+  // v0.5.5: Chrono visibility culling ranges
+  const CHRONO_VISIBLE_RANGE = 16;
+  const CHRONO_FADE_RANGE = 24;
+
   const scaleRef = useRef(1);
   useFrame((state) => {
     const V = PHOTO_VISIBILITY;
     const isChaos = mode === TreeMode.CHAOS;
-    const baseTarget = mode === TreeMode.FORMED ? data.formedScale : data.chaosScale;
+    const isChrono = mode === TreeMode.CHRONO_STREAM;
+    isChronoRef.current = isChrono;
+
+    // v0.5.5: Compute chrono scale dynamically (avoid focusIndex-driven full rebuild)
+    const chronoScale = getChronoStreamPhotoScale(data.chronoIndex, focusIndex, total);
+    const baseTarget = mode === TreeMode.FORMED ? data.nebulaScale : isChrono ? chronoScale : data.constellationScale;
 
     // Highlight multiplier
     const hlMulti = isLocked ? V.lockedScale : isHovered ? V.hoverScale : isCandidate ? V.candidateScale : 1.0;
@@ -183,18 +222,62 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
     }
   });
 
+  // v0.5.5: Detect mode transition start for stagger delay
+  useEffect(() => {
+    if (prevModeRef.current !== mode) {
+      modeTransitionStartedAtRef.current = performance.now();
+      prevModeRef.current = mode;
+    }
+  }, [mode]);
+
   useFrame((state, delta) => {
     if (!groupRef.current) return;
 
     const isFormed = mode === TreeMode.FORMED;
+    const isChrono = mode === TreeMode.CHRONO_STREAM;
     const time = state.clock.elapsedTime;
     
-    const targetPos = isFormed ? data.targetPos : data.chaosPos;
-    const step = delta * data.speed;
+    // v0.5.5: Compute chrono position/scale/opacity dynamically per frame
+    // to avoid full photoData rebuild on every focusIndex change.
+    const chronoPosArr = getChronoStreamPhotoPosition(data.chronoIndex, focusIndex, total);
+    const chronoPos = new THREE.Vector3(chronoPosArr[0], chronoPosArr[1], chronoPosArr[2]);
+    const chronoOpacityVal = getChronoStreamPhotoOpacity(data.chronoIndex, focusIndex, total);
+    
+    // v0.5.5: Select target position based on mode using computed chronoPos
+    let targetPos: THREE.Vector3;
+    if (isFormed) {
+      targetPos = data.nebulaPos;
+    } else if (isChrono) {
+      targetPos = chronoPos;
+    } else {
+      targetPos = data.constellationPos;
+    }
+
+    // v0.5.5: Staggered transition — photos start moving at different times
+    const now = performance.now();
+    const transitionStarted = modeTransitionStartedAtRef.current;
+    let speedMultiplier = 1;
+    if (transitionStarted !== null) {
+      const elapsedSinceTransition = now - transitionStarted;
+      const localDelay = data.transitionDelay; // 0~180ms deterministic delay
+      const localT = THREE.MathUtils.clamp((elapsedSinceTransition - localDelay) / 800, 0, 1);
+      speedMultiplier = localT * localT * (3 - 2 * localT); // smoothstep
+    }
+
+    const posSpeed = isChrono ? data.speed * 0.65 : data.speed;
+    const step = delta * posSpeed * speedMultiplier;
     groupRef.current.position.lerp(targetPos, step);
 
     const s = scaleRef.current;
     groupRef.current.scale.setScalar(s);
+
+    // v0.5.5: Chrono distance visibility culling
+    const chronoDistance = Math.abs(data.chronoIndex - focusIndex);
+    if (isChrono && chronoDistance > CHRONO_FADE_RANGE) {
+      groupRef.current.visible = false;
+    } else {
+      groupRef.current.visible = true;
+    }
 
     if (isFormed) {
         const dummy = new THREE.Object3D();
@@ -237,9 +320,10 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
       {/* Orbital tether */}
       <mesh position={[0, 0.5, -0.1]}>
         <cylinderGeometry args={[0.003, 0.003, 0.8]} />
+        {/* v0.5.5: opacity uses computed chronoOpacityVal (per-frame calculated) */}
         <meshStandardMaterial
           color="#D4AF37" metalness={1} roughness={0.2} transparent
-          opacity={data.opacity * (highlightLevel >= 3 ? 0.7 : highlightLevel >= 2 ? 0.6 : highlightLevel === 1 ? 0.5 : 0.4)}
+          opacity={(mode === TreeMode.CHRONO_STREAM ? getChronoStreamPhotoOpacity(data.chronoIndex, focusIndex, total) : 1) * (highlightLevel >= 3 ? 0.7 : highlightLevel >= 2 ? 0.6 : highlightLevel === 1 ? 0.5 : 0.4)}
         />
       </mesh>
 
@@ -337,6 +421,8 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
   lockedPhotoId,
   pauseSelection,
   focusIndex = 0,
+  nebulaOrderById,
+  chronoOrderById,
 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const [closestPhotoIndex, setClosestPhotoIndex] = React.useState<number>(0);
@@ -348,41 +434,49 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
     setHoverTick(t => t + 1); // trigger re-render
   }, []);
 
-  const photoData = useMemo(() => {
-    if (uploadedPhotos.length === 0) return [];
+  // v0.5.5: Stable photoData — only recomputed when photo count changes.
+  // Does NOT depend on focusIndex or mode, preventing full rebuild on every
+  // focus change. Chrono positions are calculated per-item in PolaroidItem.
+  const uploadedPhotosRef = useRef(uploadedPhotos);
+  uploadedPhotosRef.current = uploadedPhotos;
+  const photoDataRef = useRef<PhotoData[]>([]);
+  const [photoDataVersion, setPhotoDataVersion] = useState(0);
+
+  useEffect(() => {
+    const photos = uploadedPhotosRef.current;
+    const mems = memories;
+    if (photos.length === 0) {
+      photoDataRef.current = [];
+      setPhotoDataVersion(v => v + 1);
+      return;
+    }
+    const count = photos.length;
     const data: PhotoData[] = [];
-    const count = uploadedPhotos.length;
-    const isChrono = mode === TreeMode.CHRONO_STREAM;
     for (let i = 0; i < count; i++) {
-      const targetPos = getNebulaPhotoPosition(i, count);
-      let chaosPos: THREE.Vector3;
-      let formedScale: number;
-      let chaosScale: number;
-
-      if (isChrono) {
-        const pos = getChronoStreamPhotoPosition(i, focusIndex, count);
-        chaosPos = new THREE.Vector3(pos[0], pos[1], pos[2]);
-        formedScale = getChronoStreamPhotoScale(i, focusIndex, count);
-        chaosScale = getChronoStreamPhotoScale(i, focusIndex, count);
-      } else {
-        chaosPos = getConstellationPhotoPosition(i, count);
-        formedScale = getNebulaPhotoScale(i, count);
-        chaosScale = getConstellationPhotoScale(i, count);
-      }
-
+      const memory = mems?.[i];
+      const memoryId = memory?.id ?? `photo-${i}`;
+      const nebulaIdx = nebulaOrderById?.[memoryId] ?? i;
+      const chronoIdx = chronoOrderById?.[memoryId] ?? i;
       data.push({
         id: i,
-        url: uploadedPhotos[i],
-        chaosPos,
-        targetPos,
-        speed: 0.3 + Math.random() * 0.4,
-        formedScale,
-        chaosScale,
-        opacity: isChrono ? getChronoStreamPhotoOpacity(i, focusIndex, count) : 1,
+        url: photos[i],
+        constellationPos: getConstellationPhotoPosition(nebulaIdx, count),
+        nebulaPos: getNebulaPhotoPosition(nebulaIdx, count),
+        speed: 0.3 + hash01(memoryId, 777) * 0.4,
+        constellationScale: getConstellationPhotoScale(nebulaIdx, count),
+        nebulaScale: getNebulaPhotoScale(nebulaIdx, count),
+        nebulaIndex: nebulaIdx,
+        chronoIndex: chronoIdx,
+        transitionDelay: hash01(memoryId, 991) * 0.18, // 0~180ms deterministic stagger
       });
     }
-    return data;
-  }, [uploadedPhotos, mode, focusIndex]);
+    photoDataRef.current = data;
+    setPhotoDataVersion(v => v + 1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedPhotos.length, memories, nebulaOrderById, chronoOrderById]);
+
+  // Stable reference — changes only when photoData is recomputed
+  const photoData = useMemo(() => photoDataRef.current, [photoDataVersion]);
 
   const handlePhotoClick = useCallback(
     (index: number) => (e: ThreeEvent<MouseEvent>) => {
@@ -500,13 +594,16 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
   // Which ID to use for "is focused" (legacy focusedPhotoId compat)
   const effectiveFocusedId = focusedPhotoId;
 
+  const total = photoData.length;
+
   return (
     <group ref={groupRef}>
       {photoData.map((data, i) => {
-        const memId = memories?.[i]?.id;
+        const mem = memories?.[i];
+        const memId = mem?.id ?? `photo-${i}`;
         return (
           <PolaroidItem
-            key={i}
+            key={memId} // v0.5.5: Stable key by memory.id — no unmount/remount on mode switch
             index={i}
             data={data}
             mode={mode}
@@ -516,6 +613,8 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
             onPointerEnter={() => setHovered(i, true)}
             onPointerLeave={() => setHovered(i, false)}
             onClick={memories && onPhotoSelect ? handlePhotoClick(i) : undefined}
+            focusIndex={focusIndex}
+            total={total}
           />
         );
       })}

@@ -100,13 +100,22 @@ export default function App() {
     return [...memories].sort(compareMemoryByTime);
   }, [memories]);
 
-  // v0.4.5: Display memories — chrono-sorted in CHRONO_STREAM, shuffled otherwise
-  const displayMemories = useMemo(() => {
-    return mode === TreeMode.CHRONO_STREAM ? chronoMemories : nebulaMemories;
-  }, [mode, nebulaMemories, chronoMemories]);
+  // v0.5.5: Stable URLs — always derived from the full memories array, never mode-switched
+  const stableUrls = useMemo(() => memories.map((m) => m.url), [memories]);
 
-  // v0.4: Display URLs derived from displayMemories
-  const displayUrls = useMemo(() => displayMemories.map((m) => m.url), [displayMemories]);
+  // v0.5.5: Nebula order map — session-shuffled index for each memory id
+  const nebulaOrderById = useMemo<Record<string, number>>(() => {
+    const map: Record<string, number> = {};
+    nebulaMemories.forEach((m, index) => { map[m.id] = index; });
+    return map;
+  }, [nebulaMemories]);
+
+  // v0.5.5: Chrono order map — date-sorted index for each memory id
+  const chronoOrderById = useMemo<Record<string, number>>(() => {
+    const map: Record<string, number> = {};
+    chronoMemories.forEach((m, index) => { map[m.id] = index; });
+    return map;
+  }, [chronoMemories]);
 
   // v0.3 + v0.3.1: Pause navigation when modal is open
   // v0.4.1: Also pause in Chrono Stream (fixed camera)
@@ -116,9 +125,10 @@ export default function App() {
   // v0.4.1: Also disable in Chrono Stream (no pinch)
   const gesturePhotoSelectionEnabled = selectedMemory === null && !isChronoMode;
 
-  // v0.3.4: Derive photo URLs from memories for Polaroids rendering
-  // v0.4: Uses displayUrls (chrono-sorted in CHRONO_STREAM, original order otherwise)
-  const memoryUrls = displayUrls;
+  // v0.5.5: Polaroids always render the full stable memories array
+  // No mode-switching of displayMemories — each photo keeps its React identity
+  const renderMemories = memories;
+  const renderUrls = stableUrls;
 
   // v0.3.4: Load memories from IndexedDB on mount
   useEffect(() => {
@@ -424,9 +434,9 @@ export default function App() {
             <Experience
               mode={mode}
               handPosition={handPosition}
-              uploadedPhotos={displayUrls}
+              uploadedPhotos={renderUrls}
               twoHandsDetected={twoHandsDetected}
-              memories={displayMemories}
+              memories={renderMemories}
               focusedPhotoId={focusedPhotoId}
               onPhotoSelect={(photo) => { setSelectedMemory(photo); setModalOpenedAt(performance.now()); }}
               onFocusedPhotoIdChange={handleFocusedPhotoIdChange}
@@ -439,6 +449,8 @@ export default function App() {
               lockedPhotoId={lockedMemory?.id ?? null}
               pauseSelection={selectedMemory !== null}
               focusIndex={focusIndex}
+              nebulaOrderById={nebulaOrderById}
+              chronoOrderById={chronoOrderById}
             />
           </Suspense>
         </Canvas>

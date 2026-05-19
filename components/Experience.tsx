@@ -1,5 +1,5 @@
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Environment, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette, Noise } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
@@ -38,6 +38,26 @@ const INVERT_HAND_ORBIT_Y = false;
 const MIN_POLAR = Math.PI / 5;       // ~36°
 const MAX_POLAR = Math.PI * 0.86;    // ~155°
 
+// ---------------------------------------------------------------------------
+// v0.5.4: Chrono Transition Smoothing constants
+// ---------------------------------------------------------------------------
+
+/** Duration of the camera fly transition (ms) */
+const CAMERA_TRANSITION_MS = 800;
+
+/** Speed factor for background group lerp */
+const BG_LERP_SPEED = 3.0;
+
+/** Speed factor for chrono visual progress lerp */
+const CHRONO_PROGRESS_SPEED = 3.5;
+
+/** Ease-in-out cubic for smooth camera fly-through */
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// ---------------------------------------------------------------------------
+
 interface ExperienceProps {
   mode: TreeMode;
   handPosition: { x: number; y: number; detected: boolean };
@@ -61,6 +81,10 @@ interface ExperienceProps {
   pauseSelection?: boolean;
   /** v0.4: Current focus index for Chrono Stream time river */
   focusIndex?: number;
+  /** v0.5.5: Nebula order map — session-shuffled index by memory id */
+  nebulaOrderById?: Record<string, number>;
+  /** v0.5.5: Chrono order map — date-sorted index by memory id */
+  chronoOrderById?: Record<string, number>;
 }
 
 export const Experience: React.FC<ExperienceProps> = ({
@@ -77,6 +101,8 @@ export const Experience: React.FC<ExperienceProps> = ({
   lockedPhotoId,
   pauseSelection,
   focusIndex = 0,
+  nebulaOrderById,
+  chronoOrderById,
 }) => {
   const controlsRef = useRef<any>(null);
   const { camera } = useThree();
@@ -91,18 +117,113 @@ export const Experience: React.FC<ExperienceProps> = ({
     polar: Math.PI / 2,
   });
 
-  // v0.4.1: Initialize camera to fixed position when entering Chrono Stream
-  useEffect(() => {
-    if (!isChrono || !controlsRef.current) return;
-    const controls = controlsRef.current;
-    // Set a stable, centered view for the time river
-    camera.position.set(0, 1.2, 9);
-    controls.target.set(0, 0, -1);
-    controls.update();
-  }, [isChrono, camera]);
+  // v0.5.4: Chrono transition smoothing refs
+  const backgroundGroupRef = useRef<THREE.Group>(null);
+  const chronoVisualProgressRef = useRef(0);
+  const cameraTransitionRef = useRef({
+    active: false,
+    startTime: 0,
+    fromPos: new THREE.Vector3(),
+    toPos: new THREE.Vector3(0, 1.2, 9),
+    fromTarget: new THREE.Vector3(),
+    toTarget: new THREE.Vector3(0, 0, -1),
+    direction: 'none' as 'toChrono' | 'toNebula' | 'none',
+  });
+  const nebulaCameraPosRef = useRef(new THREE.Vector3(0, 2, 14));
+  const nebulaTargetRef = useRef(new THREE.Vector3(0, 0, 0));
+  const prevModeRef = useRef<TreeMode>(mode);
+  const [orbitEnabled, setOrbitEnabled] = useState(true);
 
-  // v0.5.3: Relative drag-based hand orbit (replaces absolute position mapping)
-  useFrame((_, delta) => {
+  // v0.5.4: Detect mode changes → trigger camera fly transition
+  useEffect(() => {
+    if (prevModeRef.current === mode) return;
+    const controls = controlsRef.current;
+    if (!controls) { prevModeRef.current = mode; return; }
+
+    if (mode === TreeMode.CHRONO_STREAM && prevModeRef.current === TreeMode.CHAOS) {
+      // Entering Chrono Stream: record nebula position, start fly transition
+      nebulaCameraPosRef.current.copy(camera.position);
+      nebulaTargetRef.current.copy(controls.target);
+
+      cameraTransitionRef.current.fromPos.copy(camera.position);
+      cameraTransitionRef.current.fromTarget.copy(controls.target);
+      cameraTransitionRef.current.toPos.set(0, 1.2, 9);
+      cameraTransitionRef.current.toTarget.set(0, 0, -1);
+      cameraTransitionRef.current.startTime = performance.now();
+      cameraTransitionRef.current.active = true;
+      cameraTransitionRef.current.direction = 'toChrono';
+      setOrbitEnabled(false);
+    }
+
+    if (mode === TreeMode.CHAOS && prevModeRef.current === TreeMode.CHRONO_STREAM) {
+      // Exiting Chrono Stream: fly back to recorded nebula position
+      cameraTransitionRef.current.fromPos.copy(camera.position);
+      cameraTransitionRef.current.fromTarget.copy(controls.target);
+      cameraTransitionRef.current.toPos.copy(nebulaCameraPosRef.current);
+      cameraTransitionRef.current.toTarget.copy(nebulaTargetRef.current);
+      cameraTransitionRef.current.startTime = performance.now();
+      cameraTransitionRef.current.active = true;
+      cameraTransitionRef.current.direction = 'toNebula';
+      setOrbitEnabled(false);
+    }
+
+    prevModeRef.current = mode;
+  }, [mode, camera]);
+
+  // v0.5.4: Combined useFrame — camera transition, bg lerp, hand orbit
+  useFrame((state, delta) => {
+    const isChrono = mode === TreeMode.CHRONO_STREAM;
+    const ct = cameraTransitionRef.current;
+
+    // --- Camera fly transition (v0.5.4) ---
+    if (ct.active) {
+      const elapsed = performance.now() - ct.startTime;
+      const rawT = Math.min(elapsed / CAMERA_TRANSITION_MS, 1);
+      const t = easeInOutCubic(rawT);
+
+      camera.position.lerpVectors(ct.fromPos, ct.toPos, t);
+
+      if (controlsRef.current) {
+        controlsRef.current.target.lerpVectors(ct.fromTarget, ct.toTarget, t);
+        controlsRef.current.update();
+      }
+
+      if (rawT >= 1) {
+        // Snap to exact target to prevent floating-point drift
+        camera.position.copy(ct.toPos);
+        if (controlsRef.current) {
+          controlsRef.current.target.copy(ct.toTarget);
+          controlsRef.current.update();
+        }
+        ct.active = false;
+        if (ct.direction === 'toNebula') {
+          setOrbitEnabled(true);
+        }
+        ct.direction = 'none';
+      }
+    }
+
+    // --- Chrono visual progress lerp (v0.5.4) ---
+    const targetProgress = isChrono ? 1 : 0;
+    chronoVisualProgressRef.current = THREE.MathUtils.lerp(
+      chronoVisualProgressRef.current,
+      targetProgress,
+      1 - Math.exp(-delta * CHRONO_PROGRESS_SPEED)
+    );
+
+    // --- Background group smooth reposition (v0.5.4) ---
+    if (backgroundGroupRef.current) {
+      const bg = backgroundGroupRef.current;
+      const bgTargetZ = isChrono ? -12 : 0;
+      const bgTargetScale = isChrono ? 1.35 : 1;
+
+      bg.position.z = THREE.MathUtils.lerp(bg.position.z, bgTargetZ, 1 - Math.exp(-delta * BG_LERP_SPEED));
+      const nextScale = THREE.MathUtils.lerp(bg.scale.x, bgTargetScale, 1 - Math.exp(-delta * BG_LERP_SPEED));
+      bg.scale.setScalar(nextScale);
+    }
+
+    // --- Hand orbit (skip during camera transition or chrono mode) ---
+    if (ct.active) return;
     if (isChrono) return;
     if (!controlsRef.current) return;
 
@@ -182,7 +303,7 @@ export const Experience: React.FC<ExperienceProps> = ({
         maxDistance={35}
         enableDamping
         dampingFactor={0.05}
-        enabled={!isChrono}
+        enabled={orbitEnabled}
       />
 
       {/* Lighting Setup for Deep Space Memory Nebula */}
@@ -200,11 +321,8 @@ export const Experience: React.FC<ExperienceProps> = ({
       <pointLight position={[-8, 3, -8]} intensity={0.8} color="#6B5B95" /> {/* Violet fill */}
       <pointLight position={[5, -2, 5]} intensity={0.5} color="#88CCEE" /> {/* Cyan rim */}
 
-      {/* v0.4.1: Background layer — Foliage & Ornaments shift back in Chrono Stream */}
-      <group
-        position={isChrono ? [0, 0, -12] : [0, 0, 0]}
-        scale={isChrono ? 1.35 : 1}
-      >
+      {/* v0.5.4: Background layer — smooth lerp via ref + useFrame */}
+      <group ref={backgroundGroupRef}>
         <Foliage mode={mode} count={12000} />
         <Ornaments mode={mode} count={600} />
       </group>
@@ -221,13 +339,16 @@ export const Experience: React.FC<ExperienceProps> = ({
           lockedPhotoId={lockedPhotoId}
           pauseSelection={pauseSelection}
           focusIndex={focusIndex}
+          nebulaOrderById={nebulaOrderById}
+          chronoOrderById={chronoOrderById}
         />
         {/* <TreeStar mode={mode} /> */}
         
-        {/* v0.4: Chrono Stream time ribbon */}
-        {mode === TreeMode.CHRONO_STREAM && (
-          <ChronoStreamRibbon memoryCount={uploadedPhotos.length} />
-        )}
+        {/* v0.5.4: Chrono Stream time ribbon — always mounted, visible toggle to avoid geometry recreation */}
+        <ChronoStreamRibbon
+          memoryCount={uploadedPhotos.length}
+          visible={mode === TreeMode.CHRONO_STREAM}
+        />
 
       <EffectComposer enableNormalPass={false}>
         <Bloom 

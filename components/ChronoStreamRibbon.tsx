@@ -14,9 +14,11 @@ import * as THREE from 'three';
 interface ChronoStreamRibbonProps {
   /** Number of memories in the stream (determines ribbon length) */
   memoryCount: number;
+  /** v0.5.4: Whether the ribbon is visible. Kept mounted to avoid geometry recreation on toggle. */
+  visible?: boolean;
 }
 
-export const ChronoStreamRibbon: React.FC<ChronoStreamRibbonProps> = ({ memoryCount }) => {
+export const ChronoStreamRibbon: React.FC<ChronoStreamRibbonProps> = ({ memoryCount, visible = true }) => {
   const curve = useMemo(() => {
     if (memoryCount === 0) return null;
 
@@ -46,7 +48,7 @@ export const ChronoStreamRibbon: React.FC<ChronoStreamRibbonProps> = ({ memoryCo
   if (!curve || !tubeGeometry) return null;
 
   return (
-    <group>
+    <group visible={visible}>
       {/* Main ribbon tube — golden glow (v0.4.1: reduced opacity for background feel) */}
       <mesh geometry={tubeGeometry}>
         <meshStandardMaterial
