@@ -418,6 +418,7 @@ export default function App() {
           camera={{ position: [0, 2, 14], fov: 45 }}
           gl={{ antialias: false, stencil: false, alpha: false }}
           shadows
+          frameloop={memoryManagerOpen ? 'demand' : 'always'}
         >
           <Suspense fallback={null}>
             <Experience
@@ -482,6 +483,7 @@ export default function App() {
         onTwoHandsDetected={handleTwoHandsDetected}
         gestureNavigationEnabled={gestureNavigationEnabled}
         gesturePhotoSelectionEnabled={gesturePhotoSelectionEnabled}
+        disableHandTracking={memoryManagerOpen}
         hasCandidatePhoto={
           mode === TreeMode.CHRONO_STREAM
             ? chronoMemories.length > 0 && focusIndex < chronoMemories.length

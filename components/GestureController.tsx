@@ -169,6 +169,9 @@ interface GestureControllerProps {
    *  Camera preview and debug HUD remain active.
    *  v0.4.4: Deprecated in favor of chrono-specific props. Kept for backward compat. */
   disableGestureActions?: boolean;
+  /** v0.3.5: Completely stop webcam + hand tracking (no inference, no rAF loop).
+   *  Saves CPU/GPU when Memory Manager or other heavy UI is open. */
+  disableHandTracking?: boolean;
   // --- v0.4.4 Chrono Stream dedicated gestures ---
   /** Enable chrono stream swipe+pinch gestures (true when CHRONO_STREAM && !modalOpen) */
   chronoGestureEnabled?: boolean;
@@ -206,6 +209,7 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   modalOpenedAt = 0,
   onModalCloseGesture,
   disableGestureActions = false,
+  disableHandTracking = false,
   // v0.4.4 Chrono Stream dedicated gestures
   chronoGestureEnabled = false,
   hasChronoFocusMemory = false,
@@ -239,6 +243,10 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   const prevModalOpenRef = useRef(modalOpen);
   // v0.4.1: Ref for disableGestureActions to keep fresh in detection closure
   const disableActionsRef = useRef(disableGestureActions);
+  // v0.3.5: Ref for disableHandTracking
+  const disableHandTrackingRef = useRef(!!disableHandTracking);
+  /** Ref to store predictWebcam so it can be restarted from outside the setup closure */
+  const predictWebcamRef = useRef<() => void>(() => {});
 
   // -------------------------------------------------------------------------
   // v0.4.4 Chrono Stream swipe state
@@ -382,6 +390,46 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   useEffect(() => { onModalCloseGestureRef.current = onModalCloseGesture; }, [onModalCloseGesture]);
   // v0.4.1: sync disableGestureActions ref
   useEffect(() => { disableActionsRef.current = disableGestureActions; }, [disableGestureActions]);
+  // v0.3.5: sync disableHandTracking ref + handle lifecycle
+  useEffect(() => {
+    disableHandTrackingRef.current = !!disableHandTracking;
+
+    if (disableHandTracking) {
+      // Stop webcam to save power (rAF loop stops naturally via predictWebcam's early return)
+      if (videoRef.current?.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(t => t.stop());
+        videoRef.current.srcObject = null;
+      }
+      if (canvasRef.current) {
+        canvasRef.current.getContext('2d')?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
+      setIsLoaded(false);
+      // Clear hand position so camera stops moving
+      onHandPosition?.(0.5, 0.5, false);
+      onTwoHandsDetected?.(false);
+      setGestureStatus('Hand tracking paused');
+    } else {
+      // Restart webcam + prediction loop when Memory Manager closes
+      const restart = async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 320, height: 240, facingMode: 'user' }
+          });
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            setIsLoaded(true);
+            setGestureStatus('Waiting for hand...');
+            // predictWebcam will be called by the loadeddata event listener
+          }
+        } catch (err) {
+          console.error('Error restarting webcam:', err);
+          setGestureStatus('Camera unavailable');
+        }
+      };
+      setTimeout(restart, 50);
+    }
+  }, [disableHandTracking]);
   // v0.4.4: sync chrono gesture refs
   useEffect(() => { chronoGestureEnabledRef.current = chronoGestureEnabled; }, [chronoGestureEnabled]);
   useEffect(() => { hasChronoFocusMemoryRef.current = hasChronoFocusMemory; }, [hasChronoFocusMemory]);
@@ -527,6 +575,14 @@ export const GestureController: React.FC<GestureControllerProps> = ({
     const predictWebcam = () => {
       if (!handLandmarker || !videoRef.current) return;
 
+      // v0.3.5: Pause hand tracking when Memory Manager (or similar heavy UI) is open
+      if (disableHandTrackingRef.current) {
+        if (canvasRef.current) {
+          canvasRef.current.getContext('2d')?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        }
+        return; // Don't chain rAF — loop pauses here
+      }
+
       const startTimeMs = performance.now();
       if (videoRef.current.videoWidth > 0) { // Ensure video is ready
         try {
@@ -581,6 +637,9 @@ export const GestureController: React.FC<GestureControllerProps> = ({
 
       animationFrameId = requestAnimationFrame(predictWebcam);
     };
+
+    // v0.3.5: Store reference so disableHandTracking effect can restart it
+    predictWebcamRef.current = predictWebcam;
 
     const detectGesture = (landmarks: any[], allLandmarks?: any[][]) => {
       // 0 is Wrist
