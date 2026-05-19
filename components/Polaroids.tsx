@@ -18,6 +18,30 @@ const CENTER_PICK_THRESHOLD = 0.4;
 const DEPTH_PENALTY_WEIGHT = 0.05;
 
 // ---------------------------------------------------------------------------
+// v0.5.3: Polaroid Visibility & Candidate Focus Polish constants
+// ---------------------------------------------------------------------------
+
+const PHOTO_VISIBILITY = {
+  distanceBoostStart: 7.5,
+  distanceBoostEnd: 15.0,
+  distanceScaleBoostMax: 0.35,
+  candidateScale: 1.16,
+  hoverScale: 1.12,
+  lockedScale: 1.22,
+  candidateDistanceBoost: 1.12,
+  baseEmissive: 0.05,
+  distanceEmissiveBoostMax: 0.08,
+  candidateEmissive: 0.38,
+  hoverEmissive: 0.30,
+  lockedEmissive: 0.55,
+  candidateRingOpacity: 0.62,
+  hoverRingOpacity: 0.55,
+  lockedRingOpacity: 0.85,
+  candidateOuterGlowOpacity: 0.30,
+  lockedOuterGlowOpacity: 0.55,
+};
+
+// ---------------------------------------------------------------------------
 //  Interfaces
 // ---------------------------------------------------------------------------
 
@@ -103,15 +127,60 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
   
   const swayOffset = useMemo(() => Math.random() * 100, []);
 
+  // v0.5.3: Frame mesh ref for per-frame emissive updates
+  const frameMeshRef = useRef<THREE.Mesh>(null!);
+
   // v0.3.1: Highlight priority: locked(3) > hovered(2) > candidate(1) > none(0)
   const highlightLevel = isLocked ? 3 : isHovered ? 2 : isCandidate ? 1 : 0;
 
   const scaleRef = useRef(1);
   useFrame((state) => {
+    const V = PHOTO_VISIBILITY;
+    const isChaos = mode === TreeMode.CHAOS;
     const baseTarget = mode === TreeMode.FORMED ? data.formedScale : data.chaosScale;
-    const boost = highlightLevel >= 3 ? 1.08 : highlightLevel >= 2 ? 1.05 : highlightLevel === 1 ? 1.05 : 1.0;
-    const pulse = highlightLevel >= 2 ? 1 + Math.sin(state.clock.elapsedTime * 3) * 0.02 : highlightLevel === 1 ? 1 + Math.sin(state.clock.elapsedTime * 2) * 0.012 : 1;
-    scaleRef.current = THREE.MathUtils.lerp(scaleRef.current, baseTarget * boost * pulse, 0.08);
+
+    // Highlight multiplier
+    const hlMulti = isLocked ? V.lockedScale : isHovered ? V.hoverScale : isCandidate ? V.candidateScale : 1.0;
+
+    // Pulse animation
+    const pulseFreq = isLocked || isHovered ? 3 : 2;
+    const pulseAmp = isLocked || isHovered ? 0.02 : isCandidate ? 0.025 : 0;
+    const pulse = 1 + Math.sin(state.clock.elapsedTime * pulseFreq) * pulseAmp;
+
+    // Distance scale boost (CHAOS only)
+    let distanceScaleBoost = 1.0;
+    let candidateDistBoost = 1.0;
+    if (isChaos && groupRef.current) {
+      const dist = groupRef.current.position.distanceTo(state.camera.position);
+      const distT = THREE.MathUtils.clamp(
+        (dist - V.distanceBoostStart) / (V.distanceBoostEnd - V.distanceBoostStart),
+        0, 1
+      );
+      distanceScaleBoost = 1 + distT * V.distanceScaleBoostMax;
+      if (isCandidate) candidateDistBoost = V.candidateDistanceBoost;
+    }
+
+    // Final scale
+    const targetScale = baseTarget * hlMulti * pulse * distanceScaleBoost * candidateDistBoost;
+    scaleRef.current = THREE.MathUtils.lerp(scaleRef.current, targetScale, 0.08);
+
+    // Emissive intensity — write directly to material (per-frame)
+    let distEmissiveBoost = 0;
+    if (isChaos && groupRef.current) {
+      const dist = groupRef.current.position.distanceTo(state.camera.position);
+      const distT = THREE.MathUtils.clamp(
+        (dist - V.distanceBoostStart) / (V.distanceBoostEnd - V.distanceBoostStart),
+        0, 1
+      );
+      distEmissiveBoost = distT * V.distanceEmissiveBoostMax;
+    }
+    const hlEmissive = isLocked ? V.lockedEmissive : isHovered ? V.hoverEmissive : isCandidate ? V.candidateEmissive : 0;
+    const emissiveVal = V.baseEmissive + distEmissiveBoost + hlEmissive;
+
+    if (frameMeshRef.current) {
+      const mat = frameMeshRef.current.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = emissiveVal;
+    }
   });
 
   useFrame((state, delta) => {
@@ -162,11 +231,6 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
     return () => { document.body.style.cursor = ''; };
   }, [isHovered]);
 
-  const emissiveIntensity =
-    highlightLevel >= 3 ? 0.35 :
-    highlightLevel >= 2 ? 0.20 :
-    highlightLevel === 1 ? 0.18 : 0;
-
   return (
     <group ref={groupRef}>
       
@@ -182,6 +246,7 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
       {/* Frame Group */}
       <group position={[0, 0, 0]}>
         <mesh
+          ref={frameMeshRef}
           position={[0, 0, 0]}
           onPointerEnter={onPointerEnter}
           onPointerLeave={onPointerLeave}
@@ -189,10 +254,10 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
         >
           <boxGeometry args={[1.2, 1.5, 0.02]} />
           <meshStandardMaterial
-            color={highlightLevel >= 3 ? "#fffef0" : highlightLevel >= 1 ? "#fffef5" : "#fdfdfd"}
+            color={highlightLevel >= 3 ? "#fffef0" : highlightLevel >= 1 ? "#fff9dc" : "#fffdf2"}
             roughness={0.8}
             emissive="#D4AF37"
-            emissiveIntensity={emissiveIntensity}
+            emissiveIntensity={0.05}
           />
         </mesh>
 
@@ -220,23 +285,27 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
            <meshStandardMaterial color="#D4AF37" metalness={1} roughness={0.2} />
         </mesh>
 
-        {/* v0.3.1: Highlight ring — visible for candidate+ (level >= 1) */}
+        {/* v0.5.3: Highlight ring — enhanced for candidate visibility */}
         {highlightLevel >= 1 && (
           <mesh position={[0, 0, 0.025]}>
-            <ringGeometry args={[0.63, 0.66, 64]} />
+            <ringGeometry args={[0.62, 0.66, 64]} />
             <meshBasicMaterial
-              color="#D4AF37" transparent
-              opacity={highlightLevel >= 3 ? 0.75 : highlightLevel >= 2 ? 0.45 : 0.30}
+              color="#E8C860" transparent
+              opacity={highlightLevel >= 3 ? 0.85 : highlightLevel >= 2 ? 0.55 : 0.62}
               side={THREE.DoubleSide}
             />
           </mesh>
         )}
 
-        {/* v0.3.1: Locked outer halo */}
-        {highlightLevel >= 3 && (
+        {/* v0.5.3: Outer glow ring — visible for candidate+ */}
+        {highlightLevel >= 1 && (
           <mesh position={[0, 0, 0.03]}>
-            <ringGeometry args={[0.68, 0.72, 64]} />
-            <meshBasicMaterial color="#E8C860" transparent opacity={0.4} side={THREE.DoubleSide} />
+            <ringGeometry args={[0.67, 0.72, 64]} />
+            <meshBasicMaterial
+              color="#F5E6BF" transparent
+              opacity={highlightLevel >= 3 ? 0.55 : 0.30}
+              side={THREE.DoubleSide}
+            />
           </mesh>
         )}
 

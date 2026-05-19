@@ -526,13 +526,13 @@ export default function App() {
         </div>
       )}
       
-      {/* v0.3.1-lite: Gesture photo selection status hint */}
-      {!selectedMemory && memories.length > 0 && mode !== TreeMode.CHRONO_STREAM && (
+      {/* v0.5.3: Gesture photo selection status hint — shows candidate title */}
+      {!selectedMemory && memories.length > 0 && mode === TreeMode.CHAOS && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity duration-300">
           <div className="bg-black/50 backdrop-blur-sm border border-[#D4AF37]/20 rounded-full px-5 py-2">
             {candidateMemory ? (
-              <p className="text-[#D4AF37]/70 font-serif text-sm tracking-wide text-center">
-                捏合手指，打开这段回忆
+              <p className="text-[#D4AF37]/80 font-serif text-sm tracking-wide text-center">
+                已选中「{candidateMemory.title}」· 捏合打开
               </p>
             ) : (
               <p className="text-[#D4AF37]/50 font-serif text-xs tracking-wide text-center">
