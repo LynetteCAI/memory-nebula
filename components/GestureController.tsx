@@ -368,6 +368,13 @@ export const GestureController: React.FC<GestureControllerProps> = ({
     twoHandProgress: 0,
     twoHandCooldownRemaining: 0,
     twoHandBlockReason: 'none' as string,
+    // v0.5.3 hand orbit debug
+    handOrbitMode: 'relative' as string,
+    handDx: 0,
+    handDy: 0,
+    handPalmX: 0.5,
+    handPalmY: 0.5,
+    handOrbitActive: false,
   });
   const lastDebugRender = useRef(0);
 
@@ -674,8 +681,10 @@ export const GestureController: React.FC<GestureControllerProps> = ({
 
       // -----------------------------------------------------------------------
       // v0.2.1 Hand position → camera navigation with soft dead zone (v0.4.5)
+      // v0.5.3: For CHAOS relative orbit, pass raw palm center (no dead zone);
+      //         the Experience.tsx HAND_DRAG_DEAD_DELTA handles jitter filtering.
       // -----------------------------------------------------------------------
-      // Soft dead zone: smoothstep transition eliminates center jump
+      // Soft dead zone: smoothstep transition eliminates center jump (visual indicator only)
       const smoothX = applySoftDeadZone(palmCenterX, 0.5, NAVIGATION_DEAD_ZONE);
       const smoothY = applySoftDeadZone(palmCenterY, 0.5, NAVIGATION_DEAD_ZONE);
       
@@ -688,7 +697,8 @@ export const GestureController: React.FC<GestureControllerProps> = ({
       
       // Only send navigation updates when navigation is enabled (v0.3 hook)
       if (onHandPosition && gestureNavigationEnabledRef.current && !suppressNav) {
-        onHandPosition(smoothX, smoothY, true);
+        // v0.5.3: Use raw palm center for relative orbit (no center dead zone)
+        onHandPosition(palmCenterX, palmCenterY, true);
       } else if (onHandPosition) {
         // Navigation paused or suppressed — signal presence without position
         onHandPosition(0.5, 0.5, false);
@@ -1039,6 +1049,11 @@ export const GestureController: React.FC<GestureControllerProps> = ({
             twoHandProgress: td.twoHandProgress,
             twoHandCooldownRemaining: td.twoHandCooldownRemaining,
             twoHandBlockReason: td.twoHandBlockReason,
+            // v0.5.3 hand orbit debug (inactive in chrono mode)
+            handOrbitMode: 'inactive (chrono)',
+            handPalmX: 0.5,
+            handPalmY: 0.5,
+            handOrbitActive: false,
           });
         }
 
@@ -1261,6 +1276,7 @@ export const GestureController: React.FC<GestureControllerProps> = ({
         lastDebugRender.current = now;
         const cdR = Math.max(0, Math.ceil((PINCH_COOLDOWN_MS - (now - ps.lastPinchTriggeredAt)) / 100) / 10);
         const td = twoHandDebug.current;
+        const navActive = gestureNavigationEnabledRef.current && !suppressNav;
         setDebugInfo(prev => ({
           ...prev,
           candidate: hasCandidatePhotoRef.current,
@@ -1284,6 +1300,11 @@ export const GestureController: React.FC<GestureControllerProps> = ({
           twoHandProgress: td.twoHandProgress,
           twoHandCooldownRemaining: td.twoHandCooldownRemaining,
           twoHandBlockReason: td.twoHandBlockReason,
+          // v0.5.3 hand orbit debug
+          handOrbitMode: 'relative',
+          handPalmX: Math.round(palmCenterX * 1000) / 1000,
+          handPalmY: Math.round(palmCenterY * 1000) / 1000,
+          handOrbitActive: navActive,
         }));
       }
 
@@ -1559,6 +1580,16 @@ export const GestureController: React.FC<GestureControllerProps> = ({
             <p className="text-[10px] text-[#D4AF37]/50 font-mono leading-tight">
               mode: {currentMode === TreeMode.CHRONO_STREAM ? 'CHRONO' : currentMode === TreeMode.CHAOS ? 'CHAOS' : 'FORMED'}
             </p>
+            {/* v0.5.3: Hand orbit debug */}
+            <div className="mt-1 pt-1 border-t border-[#D4AF37]/10">
+              <p className="text-[10px] text-[#D4AF37]/50 font-mono leading-tight">
+                orbit: {debugInfo.handOrbitMode}
+                {' | '}active: {debugInfo.handOrbitActive ? 'YES' : 'no'}
+              </p>
+              <p className="text-[10px] text-[#D4AF37]/40 font-mono leading-tight">
+                palm: ({debugInfo.handPalmX}, {debugInfo.handPalmY})
+              </p>
+            </div>
             {/* v0.5: Two-hand transition debug */}
             <div className="mt-1 pt-1 border-t border-[#D4AF37]/10">
               <p className="text-[10px] text-[#D4AF37]/50 font-mono leading-tight">

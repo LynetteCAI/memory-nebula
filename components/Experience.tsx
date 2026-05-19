@@ -12,6 +12,32 @@ import { TreeStar } from './TreeStar';
 import { ChronoStreamRibbon } from './ChronoStreamRibbon';
 import { TreeMode, MemoryPhoto } from '../types';
 
+// ---------------------------------------------------------------------------
+// v0.5.3 Relative Hand Orbit Constants
+// ---------------------------------------------------------------------------
+
+/** Minimum hand delta before orbit rotation kicks in (filters jitter) */
+const HAND_DRAG_DEAD_DELTA = 0.003;
+
+/** Horizontal rotation speed multiplier */
+const HAND_DRAG_AZIMUTH_SPEED = Math.PI * 2.4;
+
+/** Vertical rotation speed multiplier */
+const HAND_DRAG_POLAR_SPEED = Math.PI * 1.2;
+
+/** Exponential damping factor for camera follow (higher = snappier) */
+const HAND_ORBIT_DAMPING = 8.0;
+
+/** Invert horizontal orbit direction if needed */
+const INVERT_HAND_ORBIT_X = false;
+
+/** Invert vertical orbit direction if needed */
+const INVERT_HAND_ORBIT_Y = false;
+
+/** Polar angle limits to prevent camera flip */
+const MIN_POLAR = Math.PI / 5;       // ~36°
+const MAX_POLAR = Math.PI * 0.86;    // ~155°
+
 interface ExperienceProps {
   mode: TreeMode;
   handPosition: { x: number; y: number; detected: boolean };
@@ -56,6 +82,15 @@ export const Experience: React.FC<ExperienceProps> = ({
   const { camera } = useThree();
   const isChrono = mode === TreeMode.CHRONO_STREAM;
 
+  // v0.5.3: Relative hand orbit state — drag-based virtual trackball
+  const handOrbitRef = useRef({
+    initialized: false,
+    lastX: 0.5,
+    lastY: 0.5,
+    azimuth: 0,
+    polar: Math.PI / 2,
+  });
+
   // v0.4.1: Initialize camera to fixed position when entering Chrono Stream
   useEffect(() => {
     if (!isChrono || !controlsRef.current) return;
@@ -66,49 +101,75 @@ export const Experience: React.FC<ExperienceProps> = ({
     controls.update();
   }, [isChrono, camera]);
 
-  // Update camera rotation based on hand position (v0.4.1: skip in Chrono Stream)
+  // v0.5.3: Relative drag-based hand orbit (replaces absolute position mapping)
   useFrame((_, delta) => {
     if (isChrono) return;
-    if (controlsRef.current && handPosition.detected) {
-      const controls = controlsRef.current;
-      
-      // v0.4.5: Reduced azimuth range for gentler horizontal rotation
-      const HAND_AZIMUTH_RANGE = Math.PI * 1.35;
-      const targetAzimuth = (handPosition.x - 0.5) * HAND_AZIMUTH_RANGE;
-      
-      // v0.4.5: Smoother Y mapping — direct norm clamp, no offset
-      const yNorm = Math.max(0, Math.min(1, handPosition.y));
-      const minPolar = Math.PI / 3.2;
-      const maxPolar = Math.PI / 1.75;
-      const targetPolar = THREE.MathUtils.lerp(minPolar, maxPolar, yNorm);
-      
-      // Get current angles
-      const currentAzimuth = controls.getAzimuthalAngle();
-      const currentPolar = controls.getPolarAngle();
-      
-      // Calculate angle differences (handle wrapping for azimuth)
-      let azimuthDiff = targetAzimuth - currentAzimuth;
-      if (azimuthDiff > Math.PI) azimuthDiff -= Math.PI * 2;
-      if (azimuthDiff < -Math.PI) azimuthDiff += Math.PI * 2;
-      
-      // v0.4.5: Exponential easing for smooth camera follow
-      const follow = 1 - Math.exp(-delta * 3.5);
-      const newAzimuth = currentAzimuth + azimuthDiff * follow;
-      const newPolar = currentPolar + (targetPolar - currentPolar) * follow;
-      
-      // Calculate new camera position in spherical coordinates
-      const radius = controls.getDistance();
-      const targetY = 0; // Nebula core center
-      
-      const x = radius * Math.sin(newPolar) * Math.sin(newAzimuth);
-      const y = targetY + radius * Math.cos(newPolar);
-      const z = radius * Math.sin(newPolar) * Math.cos(newAzimuth);
-      
-      // Update camera position and target
-      controls.object.position.set(x, y, z);
-      controls.target.set(0, targetY, 0);
-      controls.update();
+    if (!controlsRef.current) return;
+
+    const controls = controlsRef.current;
+    const ho = handOrbitRef.current;
+    const nebulaTarget = new THREE.Vector3(0, 0, 0);
+
+    // When hand is lost, mark uninitialized so re-entry reads current camera
+    if (!handPosition.detected) {
+      ho.initialized = false;
+      return;
     }
+
+    // Skip orbit when two hands are detected (two-hand transition in progress)
+    if (twoHandsDetected) {
+      ho.initialized = false;
+      return;
+    }
+
+    // Initialize from current camera position on first detection or re-entry
+    if (!ho.initialized) {
+      const offset = camera.position.clone().sub(nebulaTarget);
+      const spherical = new THREE.Spherical().setFromVector3(offset);
+      ho.azimuth = spherical.theta;
+      ho.polar = THREE.MathUtils.clamp(spherical.phi, MIN_POLAR, MAX_POLAR);
+      ho.lastX = handPosition.x;
+      ho.lastY = handPosition.y;
+      ho.initialized = true;
+      return; // First frame: no rotation, just initialize
+    }
+
+    // Calculate hand delta
+    let dx = handPosition.x - ho.lastX;
+    let dy = handPosition.y - ho.lastY;
+
+    // Apply dead zone to filter jitter
+    if (Math.abs(dx) < HAND_DRAG_DEAD_DELTA) dx = 0;
+    if (Math.abs(dy) < HAND_DRAG_DEAD_DELTA) dy = 0;
+
+    // Optionally invert direction
+    if (INVERT_HAND_ORBIT_X) dx = -dx;
+    if (INVERT_HAND_ORBIT_Y) dy = -dy;
+
+    // Accumulate to spherical angles
+    if (dx !== 0 || dy !== 0) {
+      ho.azimuth -= dx * HAND_DRAG_AZIMUTH_SPEED;
+      ho.polar += dy * HAND_DRAG_POLAR_SPEED;
+      ho.polar = THREE.MathUtils.clamp(ho.polar, MIN_POLAR, MAX_POLAR);
+    }
+
+    // Update last known hand position
+    ho.lastX = handPosition.x;
+    ho.lastY = handPosition.y;
+
+    // Smoothly move camera to accumulated spherical position
+    const radius = camera.position.distanceTo(nebulaTarget);
+    const follow = 1 - Math.exp(-delta * HAND_ORBIT_DAMPING);
+
+    const targetSpherical = new THREE.Spherical(radius, ho.polar, ho.azimuth);
+    const targetPosition = new THREE.Vector3().setFromSpherical(targetSpherical).add(nebulaTarget);
+
+    camera.position.lerp(targetPosition, follow);
+    camera.lookAt(nebulaTarget);
+
+    // Keep OrbitControls in sync
+    controls.target.copy(nebulaTarget);
+    controls.update();
   });
   return (
     <>
