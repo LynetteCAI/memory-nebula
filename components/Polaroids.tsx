@@ -131,6 +131,7 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const [textureAspect, setTextureAspect] = useState(1);
   const [error, setError] = useState(false);
 
   useEffect(() => {
@@ -141,6 +142,11 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
         loadedTex.colorSpace = THREE.SRGBColorSpace;
         setTexture(loadedTex);
         setError(false);
+        // v0.5.5: Preserve natural aspect ratio — no stretching
+        const img = loadedTex.image;
+        if (img && img.width && img.height) {
+          setTextureAspect(img.width / img.height);
+        }
       },
       undefined,
       (err) => {
@@ -149,6 +155,24 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
       }
     );
   }, [data.url]);
+
+  // v0.5.5: Compute photo display size preserving aspect ratio (fits within 1.0×1.0)
+  const photoSize = useMemo(() => {
+    const a = textureAspect;
+    if (a >= 1) {
+      // Landscape: width fills, height shrinks
+      return { w: 1.0, h: 1.0 / a };
+    } else {
+      // Portrait: height fills, width shrinks
+      return { w: 1.0 * a, h: 1.0 };
+    }
+  }, [textureAspect]);
+
+  // v0.5.5: Frame size adapts to photo aspect ratio with padding
+  const frameSize = useMemo(() => ({
+    w: photoSize.w + 0.2,
+    h: photoSize.h + 0.5, // extra bottom padding for title
+  }), [photoSize]);
   
   const swayOffset = useMemo(() => Math.random() * 100, []);
 
@@ -327,7 +351,7 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
         />
       </mesh>
 
-      {/* Frame Group */}
+      {/* Frame Group — v0.5.5: sizes adapt to photo aspect ratio */}
       <group position={[0, 0, 0]}>
         <mesh
           ref={frameMeshRef}
@@ -336,7 +360,7 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
           onPointerLeave={onPointerLeave}
           onClick={onClick}
         >
-          <boxGeometry args={[1.2, 1.5, 0.02]} />
+          <boxGeometry args={[frameSize.w, frameSize.h, 0.02]} />
           <meshStandardMaterial
             color={highlightLevel >= 3 ? "#fffef0" : highlightLevel >= 1 ? "#fff9dc" : "#fffdf2"}
             roughness={0.8}
@@ -345,18 +369,20 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
           />
         </mesh>
 
+        {/* Invisible clickable plane matching photo area */}
         <mesh
-          position={[0, 0.15, 0.035]}
+          position={[0, (frameSize.h - 0.5) / 2 - 0.25, 0.035]}
           onPointerEnter={onPointerEnter}
           onPointerLeave={onPointerLeave}
           onClick={onClick}
         >
-          <planeGeometry args={[1.0, 1.0]} />
+          <planeGeometry args={[photoSize.w, photoSize.h]} />
           <meshBasicMaterial transparent opacity={0} depthTest={false} />
         </mesh>
 
-        <mesh position={[0, 0.15, 0.025]}>
-          <planeGeometry args={[1.0, 1.0]} />
+        {/* Photo — preserves natural aspect ratio */}
+        <mesh position={[0, (frameSize.h - 0.5) / 2 - 0.25, 0.025]}>
+          <planeGeometry args={[photoSize.w, photoSize.h]} />
           {texture && !error ? (
             <meshBasicMaterial map={texture} />
           ) : (
@@ -364,15 +390,16 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
           )}
         </mesh>
 
-        <mesh position={[0, 0.7, 0.025]} rotation={[0,0,0]}>
+        {/* Decorative rivet at top-center */}
+        <mesh position={[0, frameSize.h / 2 - 0.08, 0.025]} rotation={[0,0,0]}>
            <boxGeometry args={[0.1, 0.05, 0.05]} />
            <meshStandardMaterial color="#D4AF37" metalness={1} roughness={0.2} />
         </mesh>
 
-        {/* v0.5.3: Highlight ring — enhanced for candidate visibility */}
+        {/* v0.5.3: Highlight ring — scales with photo */}
         {highlightLevel >= 1 && (
-          <mesh position={[0, 0, 0.025]}>
-            <ringGeometry args={[0.62, 0.66, 64]} />
+          <mesh position={[0, (frameSize.h - 0.5) / 2 - 0.25, 0.025]}>
+            <ringGeometry args={[Math.max(photoSize.w, photoSize.h) * 0.52 + 0.1, Math.max(photoSize.w, photoSize.h) * 0.52 + 0.14, 64]} />
             <meshBasicMaterial
               color="#E8C860" transparent
               opacity={highlightLevel >= 3 ? 0.85 : highlightLevel >= 2 ? 0.55 : 0.62}
@@ -381,10 +408,10 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
           </mesh>
         )}
 
-        {/* v0.5.3: Outer glow ring — visible for candidate+ */}
+        {/* v0.5.3: Outer glow ring — scales with photo */}
         {highlightLevel >= 1 && (
-          <mesh position={[0, 0, 0.03]}>
-            <ringGeometry args={[0.67, 0.72, 64]} />
+          <mesh position={[0, (frameSize.h - 0.5) / 2 - 0.25, 0.03]}>
+            <ringGeometry args={[Math.max(photoSize.w, photoSize.h) * 0.52 + 0.15, Math.max(photoSize.w, photoSize.h) * 0.52 + 0.20, 64]} />
             <meshBasicMaterial
               color="#F5E6BF" transparent
               opacity={highlightLevel >= 3 ? 0.55 : 0.30}
@@ -394,7 +421,7 @@ const PolaroidItem: React.FC<PolaroidItemProps> = ({
         )}
 
         <Text
-          position={[0, -0.55, 0.03]}
+          position={[0, -frameSize.h / 2 + 0.1, 0.03]}
           fontSize={0.12}
           color="#333"
           anchorX="center"
@@ -467,7 +494,9 @@ export const Polaroids: React.FC<PolaroidsProps> = ({
         nebulaScale: getNebulaPhotoScale(nebulaIdx, count),
         nebulaIndex: nebulaIdx,
         chronoIndex: chronoIdx,
-        transitionDelay: hash01(memoryId, 991) * 0.18, // 0~180ms deterministic stagger
+        // v0.5.5: Stagger delay — earlier chrono photos land faster
+        // Base delay grows with chronoIndex so the front of the timeline starts moving sooner
+        transitionDelay: Math.min(chronoIdx * 0.012, 0.10) + hash01(memoryId, 991) * 0.05,
       });
     }
     photoDataRef.current = data;

@@ -58,8 +58,8 @@ const PINCH_HOLD_MS = 300;
 /** Cooldown after pinch confirm before another pinch is allowed */
 const PINCH_COOLDOWN_MS = 1000;
 
-/** Debug HUD for gesture photo selection */
-const DEBUG_GESTURES = true;
+/** Debug HUD for gesture photo selection — default OFF, toggle with debug button */
+const DEBUG_GESTURES = false;
 /** Min interval between debug HUD re-renders (ms) */
 const DEBUG_HUD_INTERVAL_MS = 100;
 
@@ -1022,7 +1022,7 @@ export const GestureController: React.FC<GestureControllerProps> = ({
         }
 
         // Debug HUD update for chrono mode
-        if (DEBUG_GESTURES && chronoNow - lastDebugRender.current > DEBUG_HUD_INTERVAL_MS) {
+        if (effectiveDebug && chronoNow - lastDebugRender.current > DEBUG_HUD_INTERVAL_MS) {
           lastDebugRender.current = chronoNow;
           const cdR = Math.max(0, Math.ceil((PINCH_COOLDOWN_MS - (chronoNow - cps.lastPinchTriggeredAt)) / 100) / 10);
           const swipeCdR = Math.max(0, Math.ceil((SWIPE_COOLDOWN_MS - (chronoNow - ss.lastSwipeTriggeredAt)) / 100) / 10);
@@ -1272,7 +1272,7 @@ export const GestureController: React.FC<GestureControllerProps> = ({
         if (ps.pinching) { ps.pinching = false; ps.pinchSince = 0; ps.pinchTriggered = false; }
       }
 
-      if (DEBUG_GESTURES && now - lastDebugRender.current > DEBUG_HUD_INTERVAL_MS) {
+      if (effectiveDebug && now - lastDebugRender.current > DEBUG_HUD_INTERVAL_MS) {
         lastDebugRender.current = now;
         const cdR = Math.max(0, Math.ceil((PINCH_COOLDOWN_MS - (now - ps.lastPinchTriggeredAt)) / 100) / 10);
         const td = twoHandDebug.current;
@@ -1521,8 +1521,25 @@ export const GestureController: React.FC<GestureControllerProps> = ({
     };
   }, [onModeChange]);
 
+  // v0.5.5: Debug HUD toggle state (default OFF)
+  const [showDebug, setShowDebug] = useState(false);
+  const effectiveDebug = DEBUG_GESTURES || showDebug;
+
   return (
     <div className="absolute top-6 right-[8%] z-50 flex flex-col items-end pointer-events-none">
+
+      {/* v0.5.5: Small debug toggle button */}
+      <button
+        onClick={() => setShowDebug((v) => !v)}
+        className={`absolute -top-1 -left-6 z-30 w-5 h-5 flex items-center justify-center rounded text-[9px] font-mono transition-colors pointer-events-auto ${
+          effectiveDebug
+            ? 'bg-[#D4AF37]/30 text-[#D4AF37] border border-[#D4AF37]/50'
+            : 'bg-black/40 text-[#D4AF37]/40 border border-[#D4AF37]/20 hover:bg-[#D4AF37]/20 hover:text-[#D4AF37]/70'
+        }`}
+        title={effectiveDebug ? '隐藏调试信息' : '显示调试信息'}
+      >
+        {'</>'}
+      </button>
 
       
       {/* Camera Preview Frame */}
@@ -1572,8 +1589,8 @@ export const GestureController: React.FC<GestureControllerProps> = ({
         </p>
       </div>
 
-      {/* v0.3.2: Pinch + Modal Close Debug HUD */}
-      {DEBUG_GESTURES && (
+      {/* v0.3.2: Pinch + Modal Close Debug HUD (v0.5.5: toggleable via debug button) */}
+      {effectiveDebug && (
         <div className="mt-2 w-[18.75vw] pointer-events-auto">
           <div className="bg-black/70 backdrop-blur-sm border border-[#D4AF37]/20 rounded p-2 text-right">
             {/* v0.4.4: Chrono mode indicator */}
