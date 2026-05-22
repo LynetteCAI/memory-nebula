@@ -67,6 +67,86 @@ export interface MemoryPhoto {
  * v0.3: Normalize an uploaded photo URL into a MemoryPhoto with sensible defaults.
  * v0.3.4: Extended with optional metadata overrides and new fields.
  */
+// ==============================================================================
+// v0.6 Gesture Onboarding Tutorial Types
+// ==============================================================================
+
+export type TutorialStepId =
+  | "camera"
+  | "fist"
+  | "openPalm"
+  | "openPalmOrbit"
+  | "pinch"
+  | "twoHandSpread"
+  | "chronoSwipe"
+  | "twoHandGather"
+  | "done";
+
+export interface TutorialGestureState {
+  handDetected: boolean;
+  twoHandsDetected: boolean;
+
+  rawGesture?: string;
+  stableGesture?: string;
+
+  openPalmDetected: boolean;
+  fistDetected: boolean;
+
+  pinchDetected: boolean;
+  rawPinch?: boolean;
+  pinchPostureOk?: boolean;
+  pinchRatio?: number;
+  pinchHoldMs?: number;
+
+  /** v0.6: Simple hand move distance progress (legacy, always 0 in v0.6.3+) */
+  handMoveProgress: number;
+
+  // v0.6.3: Open palm orbit tracking — replaces simple handMove
+  openPalmOrbitProgress: number;
+  openPalmOrbitPathLength: number;
+  openPalmOrbitVisitedQuadrants: number;
+
+  twoHandSpreadProgress: number;
+
+  // v0.6.2: Chrono swipe detection
+  chronoSwipeLeftDetected: boolean;
+  chronoSwipeRightDetected: boolean;
+  chronoSwipeProgress: number;
+  chronoSwipeDirection?: "left" | "right" | "none";
+  chronoSwipeDeltaX?: number;
+
+  // v0.6.2: Two-hand gather detection
+  twoHandGatherProgress: number;
+  twoHandGatherDistanceX?: number;
+  twoHandGatherStartDistanceX?: number;
+
+  lastUpdatedAt?: number;
+}
+
+export const defaultTutorialGestureState: TutorialGestureState = {
+  handDetected: false,
+  twoHandsDetected: false,
+  rawGesture: "none",
+  stableGesture: "none",
+  openPalmDetected: false,
+  fistDetected: false,
+  pinchDetected: false,
+  rawPinch: false,
+  pinchPostureOk: false,
+  pinchRatio: undefined,
+  pinchHoldMs: 0,
+  handMoveProgress: 0,
+  openPalmOrbitProgress: 0,
+  openPalmOrbitPathLength: 0,
+  openPalmOrbitVisitedQuadrants: 0,
+  twoHandSpreadProgress: 0,
+  chronoSwipeLeftDetected: false,
+  chronoSwipeRightDetected: false,
+  chronoSwipeProgress: 0,
+  chronoSwipeDirection: "none",
+  twoHandGatherProgress: 0,
+};
+
 export function normalizeUploadToMemoryPhoto(
   url: string,
   index: number,

@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import { TreeMode } from '../types';
+import type { TutorialGestureState } from '../types';
 
 // ---------------------------------------------------------------------------
 // v0.2.1 Gesture Stabilization Constants
@@ -193,6 +194,11 @@ interface GestureControllerProps {
   // --- v0.5 Two-Hand Transition Debug ---
   /** Called when two-hand transition state changes (throttled) */
   onTwoHandTransitionStateChange?: (state: TwoHandTransitionDebugState) => void;
+  // --- v0.6 Gesture Onboarding Tutorial ---
+  /** When true, run detection but skip all business callbacks. Only emits tutorial state. */
+  tutorialMode?: boolean;
+  /** Called with tutorial gesture state (throttled ~10fps) */
+  onTutorialGestureStateChange?: (state: TutorialGestureState) => void;
 }
 
 export const GestureController: React.FC<GestureControllerProps> = ({ 
@@ -221,6 +227,9 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   onExitChronoGesture,
   chronoTransitionGestureEnabled = false,
   onTwoHandTransitionStateChange,
+  // v0.6 Tutorial mode
+  tutorialMode = false,
+  onTutorialGestureStateChange,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -300,7 +309,43 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   // v0.5: Throttled callback ref + last emit time
   const onTwoHandStateChangeRef = useRef(onTwoHandTransitionStateChange);
   const lastTwoHandEmitTime = useRef(0);
+
+  // v0.6: Tutorial mode refs
+  const tutorialModeRef = useRef(false);
+  const onTutorialGestureStateChangeRef = useRef<((state: TutorialGestureState) => void) | undefined>(undefined);
+  const tutorialTrackingRef = useRef({
+    pinchHoldStart: 0,
+    lastEmitTime: 0,
+    twoHandSpreadStartX: null as number | null,
+    // v0.6.2: Chrono swipe tracking
+    chronoSwipePalmHistory: [] as { x: number; y: number; time: number }[],
+    chronoSwipeLeftDone: false,
+    chronoSwipeRightDone: false,
+    chronoSwipeLastTriggeredAt: 0,
+    // v0.6.2: Two-hand gather tracking
+    twoHandGatherStartX: null as number | null,
+    twoHandGatherCompleted: false,
+    twoHandGatherStartCenterX: null as number | null,
+    twoHandGatherStartCenterY: null as number | null,
+    twoHandGatherStartTime: 0,
+    // v0.6.3: Open palm orbit tracking
+    orbitActive: false,
+    orbitStartX: 0,
+    orbitStartY: 0,
+    orbitPrevX: 0,
+    orbitPrevY: 0,
+    orbitPathLength: 0,
+    orbitBoundsMinX: 0,
+    orbitBoundsMaxX: 0,
+    orbitBoundsMinY: 0,
+    orbitBoundsMaxY: 0,
+    orbitQuadrants: 0,
+    orbitCompleted: false,
+  });
   const TWO_HAND_EMIT_INTERVAL_MS = 100; // throttle to ~10fps
+
+  // v0.6: Tutorial mode throttle
+  const TUTORIAL_EMIT_INTERVAL_MS = 100;
   
   // -------------------------------------------------------------------------
   // v0.2.1 Stable-hold trigger state (replaces old frame-count debounce)
@@ -452,6 +497,9 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   useEffect(() => { onExitChronoGestureRef.current = onExitChronoGesture; }, [onExitChronoGesture]);
   // v0.5: sync two-hand transition state change callback
   useEffect(() => { onTwoHandStateChangeRef.current = onTwoHandTransitionStateChange; }, [onTwoHandTransitionStateChange]);
+  // v0.6: sync tutorial mode refs
+  useEffect(() => { tutorialModeRef.current = tutorialMode; }, [tutorialMode]);
+  useEffect(() => { onTutorialGestureStateChangeRef.current = onTutorialGestureStateChange; }, [onTutorialGestureStateChange]);
 
   useEffect(() => {
     let handLandmarker: HandLandmarker | null = null;
@@ -604,15 +652,26 @@ export const GestureController: React.FC<GestureControllerProps> = ({
 
             // Draw all detected hands at once
             drawAllHands(result.landmarks);
-            
-            // Use first hand for gesture detection (includes pinch)
-            const landmarks = result.landmarks[0];
-            // Pass all landmarks for pinch detection across any hand
-            detectGesture(landmarks, result.landmarks);
+
+            // v0.6: Tutorial mode — compute gesture state, skip business logic
+            if (tutorialModeRef.current) {
+              computeTutorialGestureState(result.landmarks, startTimeMs);
+            } else {
+              // Use first hand for gesture detection (includes pinch)
+              const landmarks = result.landmarks[0];
+              // Pass all landmarks for pinch detection across any hand
+              detectGesture(landmarks, result.landmarks);
+            }
           } else {
-              // v0.2.1: Hand lost — do NOT change mode, just stop navigation
-              const modeName = currentModeRef.current === TreeMode.CHAOS ? 'Constellation' : 'Core';
-              setGestureStatus(`No hand — ${modeName} locked`);
+              // v0.6: In tutorial mode, emit empty state when no hand detected
+              if (tutorialModeRef.current) {
+                emitTutorialNoHandState(startTimeMs);
+                setGestureStatus('Tutorial: 等待检测到手...');
+              } else {
+                // v0.2.1: Hand lost — do NOT change mode, just stop navigation
+                const modeName = currentModeRef.current === TreeMode.CHAOS ? 'Constellation' : 'Core';
+                setGestureStatus(`No hand — ${modeName} locked`);
+              }
               setHandPos(null);
               if (onHandPosition) {
                 onHandPosition(0.5, 0.5, false);
@@ -647,6 +706,332 @@ export const GestureController: React.FC<GestureControllerProps> = ({
 
     // v0.3.5: Store reference so disableHandTracking effect can restart it
     predictWebcamRef.current = predictWebcam;
+
+    // v0.6: Emit tutorial state when no hand is detected
+    const emitTutorialNoHandState = (now: number) => {
+      const cb = onTutorialGestureStateChangeRef.current;
+      if (!cb) return;
+      const tt = tutorialTrackingRef.current;
+      if (now - tt.lastEmitTime < TUTORIAL_EMIT_INTERVAL_MS) return;
+      tt.lastEmitTime = now;
+      // Prune stale swipe history even when no hands
+      if (tt.chronoSwipePalmHistory.length > 0) {
+        tt.chronoSwipePalmHistory = tt.chronoSwipePalmHistory.filter(
+          e => now - e.time < SWIPE_HISTORY_MAX_AGE_MS
+        );
+      }
+      cb({
+        handDetected: false,
+        twoHandsDetected: false,
+        rawGesture: 'none',
+        stableGesture: 'none',
+        openPalmDetected: false,
+        fistDetected: false,
+        pinchDetected: false,
+        rawPinch: false,
+        pinchPostureOk: false,
+        pinchRatio: undefined,
+        pinchHoldMs: 0,
+        handMoveProgress: 0,
+        openPalmOrbitProgress: tt.orbitCompleted ? 1 : 0,
+        openPalmOrbitPathLength: Math.round(tt.orbitPathLength * 100) / 100,
+        openPalmOrbitVisitedQuadrants: tt.orbitCompleted ? 3 : 0,
+        twoHandSpreadProgress: 0,
+        chronoSwipeLeftDetected: tt.chronoSwipeLeftDone,
+        chronoSwipeRightDetected: tt.chronoSwipeRightDone,
+        chronoSwipeProgress: (tt.chronoSwipeLeftDone ? 0.5 : 0) + (tt.chronoSwipeRightDone ? 0.5 : 0),
+        chronoSwipeDirection: 'none',
+        twoHandGatherProgress: tt.twoHandGatherCompleted ? 1 : 0,
+        lastUpdatedAt: now,
+      });
+    };
+
+    // v0.6: Compute tutorial gesture state (read-only, no business callbacks)
+    const computeTutorialGestureState = (allLandmarks: any[][], now: number) => {
+      const cb = onTutorialGestureStateChangeRef.current;
+      if (!cb) return;
+      const tt = tutorialTrackingRef.current;
+      if (now - tt.lastEmitTime < TUTORIAL_EMIT_INTERVAL_MS) return;
+      tt.lastEmitTime = now;
+
+      const landmarks = allLandmarks[0];
+      const wrist = landmarks[0];
+      const twoHandsDetected = allLandmarks.length >= 2;
+
+      // Palm center
+      const palmCenterX = (landmarks[0].x + landmarks[5].x + landmarks[9].x + landmarks[13].x + landmarks[17].x) / 5;
+      const palmCenterY = (landmarks[0].y + landmarks[5].y + landmarks[9].y + landmarks[13].y + landmarks[17].y) / 5;
+
+      // Extended fingers count (same logic as detectGesture)
+      const ftCheck = [8, 12, 16, 20], fbCheck = [5, 9, 13, 17];
+      let extendedFingers = 0;
+      for (let i = 0; i < 4; i++) {
+        const dt = Math.hypot(landmarks[ftCheck[i]].x - wrist.x, landmarks[ftCheck[i]].y - wrist.y);
+        const db = Math.hypot(landmarks[fbCheck[i]].x - wrist.x, landmarks[fbCheck[i]].y - wrist.y);
+        if (dt > db * 1.5) extendedFingers++;
+      }
+      const dtThumb = Math.hypot(landmarks[4].x - wrist.x, landmarks[4].y - wrist.y);
+      const dbThumb = Math.hypot(landmarks[2].x - wrist.x, landmarks[2].y - wrist.y);
+      if (dtThumb > dbThumb * 1.2) extendedFingers++;
+
+      const openPalmDetected = extendedFingers >= 4;
+      const fistDetected = extendedFingers <= 1;
+      const rawGesture = openPalmDetected ? 'open' : (fistDetected ? 'fist' : 'unknown');
+
+      // Pinch detection (same logic as detectGesture)
+      const checkPinchLocal = (h: any[]): number => {
+        const w = h[0], tTip = h[4], iTip = h[8], mMcp = h[9];
+        const pd = Math.hypot(tTip.x - iTip.x, tTip.y - iTip.y);
+        const palm = Math.hypot(w.x - mMcp.x, w.y - mMcp.y);
+        return palm === 0 ? 999 : pd / palm;
+      };
+      const areNonPinchFingersExtendedLocal = (h: any[]): boolean => {
+        const w = h[0];
+        const checks: [number, number][] = [[12, 9], [16, 13], [20, 17]];
+        let extended = 0;
+        for (const [tipIdx, baseIdx] of checks) {
+          const dt = Math.hypot(h[tipIdx].x - w.x, h[tipIdx].y - w.y);
+          const db = Math.hypot(h[baseIdx].x - w.x, h[baseIdx].y - w.y);
+          if (dt > db * 1.3) extended++;
+        }
+        return extended >= 2;
+      };
+
+      let bestRatio = 999;
+      let pinchHand: any[] | null = null;
+      for (const h of allLandmarks) {
+        const r = checkPinchLocal(h);
+        if (r < bestRatio) { bestRatio = r; pinchHand = h; }
+      }
+      const rawPinch = bestRatio < PINCH_RATIO_THRESHOLD;
+      const pinchPostureOk = pinchHand !== null && areNonPinchFingersExtendedLocal(pinchHand);
+      const pinchDetected = rawPinch && pinchPostureOk;
+
+      // Pinch hold timer
+      let pinchHoldMs = 0;
+      if (pinchDetected) {
+        if (tt.pinchHoldStart === 0) tt.pinchHoldStart = now;
+        pinchHoldMs = now - tt.pinchHoldStart;
+      } else {
+        tt.pinchHoldStart = 0;
+      }
+
+      // ======================================================================
+      // v0.6.3: Open palm orbit tracking — requires open palm + significant
+      // multi-directional movement (replaces v0.6 simple handMove)
+      // ======================================================================
+      let openPalmOrbitProgress = 0;
+      let openPalmOrbitPathLength = 0;
+      let openPalmOrbitVisitedQuadrants = 0;
+
+      if (tt.orbitCompleted) {
+        openPalmOrbitProgress = 1;
+      } else if (openPalmDetected) {
+        if (!tt.orbitActive) {
+          tt.orbitActive = true;
+          tt.orbitStartX = palmCenterX;
+          tt.orbitStartY = palmCenterY;
+          tt.orbitPrevX = palmCenterX;
+          tt.orbitPrevY = palmCenterY;
+          tt.orbitPathLength = 0;
+          tt.orbitBoundsMinX = palmCenterX;
+          tt.orbitBoundsMaxX = palmCenterX;
+          tt.orbitBoundsMinY = palmCenterY;
+          tt.orbitBoundsMaxY = palmCenterY;
+          tt.orbitQuadrants = 0;
+        } else {
+          const dx = palmCenterX - tt.orbitPrevX;
+          const dy = palmCenterY - tt.orbitPrevY;
+          tt.orbitPathLength += Math.sqrt(dx * dx + dy * dy);
+          tt.orbitPrevX = palmCenterX;
+          tt.orbitPrevY = palmCenterY;
+          tt.orbitBoundsMinX = Math.min(tt.orbitBoundsMinX, palmCenterX);
+          tt.orbitBoundsMaxX = Math.max(tt.orbitBoundsMaxX, palmCenterX);
+          tt.orbitBoundsMinY = Math.min(tt.orbitBoundsMinY, palmCenterY);
+          tt.orbitBoundsMaxY = Math.max(tt.orbitBoundsMaxY, palmCenterY);
+
+          // Track which quadrants visited (relative to orbit start center)
+          const relX = palmCenterX - tt.orbitStartX;
+          const relY = palmCenterY - tt.orbitStartY;
+          const qx = relX >= 0 ? 1 : 0;
+          const qy = relY >= 0 ? 1 : 0;
+          tt.orbitQuadrants |= (1 << (qx * 2 + qy));
+        }
+
+        // Compute combined progress from all metrics
+        const pathLen = tt.orbitPathLength;
+        const boundsW = tt.orbitBoundsMaxX - tt.orbitBoundsMinX;
+        const boundsH = tt.orbitBoundsMaxY - tt.orbitBoundsMinY;
+        let vq = 0;
+        let tmp = tt.orbitQuadrants;
+        while (tmp) { vq += tmp & 1; tmp >>= 1; }
+
+        const pPath = Math.min(1, pathLen / 0.55);
+        const pWidth = Math.min(1, boundsW / 0.18);
+        const pHeight = Math.min(1, boundsH / 0.14);
+        const pQuad = Math.min(1, vq / 3);
+        openPalmOrbitProgress = Math.min(pPath, pWidth, pHeight, pQuad);
+        openPalmOrbitPathLength = Math.round(pathLen * 100) / 100;
+        openPalmOrbitVisitedQuadrants = vq;
+
+        if (openPalmOrbitProgress >= 1) tt.orbitCompleted = true;
+      } else {
+        tt.orbitActive = false;
+        // Keep accumulated data for resume, but don't grow it
+      }
+
+      // Two-hand spread progress
+      let twoHandSpreadProgress = 0;
+      if (twoHandsDetected) {
+        const centers = allLandmarks.map((h: any[]) => {
+          const w = h[0], iMcp = h[5], pMcp = h[17];
+          return {
+            x: (w.x + iMcp.x + pMcp.x) / 3,
+            y: (w.y + iMcp.y + pMcp.y) / 3,
+          };
+        });
+        const a = centers[0], b = centers[1];
+        const leftH = a.x < b.x ? a : b;
+        const rightH = a.x < b.x ? b : a;
+        const distanceX = rightH.x - leftH.x;
+
+        if (tt.twoHandSpreadStartX === null) {
+          tt.twoHandSpreadStartX = distanceX;
+        }
+        const delta = distanceX - tt.twoHandSpreadStartX;
+        twoHandSpreadProgress = Math.min(1, Math.max(0, delta / SPREAD_DELTA_THRESHOLD));
+      } else {
+        tt.twoHandSpreadStartX = null;
+      }
+
+      // ======================================================================
+      // v0.6.2: Chrono swipe detection (reuses real swipe logic & thresholds)
+      // ======================================================================
+      // Prune old history entries
+      tt.chronoSwipePalmHistory = tt.chronoSwipePalmHistory.filter(
+        e => now - e.time < SWIPE_HISTORY_MAX_AGE_MS
+      );
+      // Add current palm center
+      tt.chronoSwipePalmHistory.push({ x: palmCenterX, y: palmCenterY, time: now });
+
+      let chronoSwipeDirection: 'left' | 'right' | 'none' = 'none';
+      let chronoDeltaX = 0;
+      let chronoSwipeThisFrame = false;
+
+      if (tt.chronoSwipePalmHistory.length >= 2) {
+        const first = tt.chronoSwipePalmHistory[0];
+        const last = tt.chronoSwipePalmHistory[tt.chronoSwipePalmHistory.length - 1];
+        const dx = last.x - first.x;
+        const dy = last.y - first.y;
+        const duration = last.time - first.time;
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        const inCooldown = (now - tt.chronoSwipeLastTriggeredAt) < SWIPE_COOLDOWN_MS;
+
+        if (!inCooldown && absDx >= SWIPE_MIN_DISTANCE && duration >= SWIPE_MIN_DURATION_MS && duration <= SWIPE_MAX_DURATION_MS && absDy < SWIPE_MAX_VERTICAL_DRIFT) {
+          const dir = dx < 0 ? 'left' : 'right';
+          chronoSwipeDirection = INVERT_CHRONO_SWIPE ? (dir === 'left' ? 'right' : 'left') : dir;
+          chronoDeltaX = dx;
+          chronoSwipeThisFrame = true;
+
+          if (chronoSwipeDirection === 'left' && !tt.chronoSwipeLeftDone) {
+            tt.chronoSwipeLeftDone = true;
+          } else if (chronoSwipeDirection === 'right' && !tt.chronoSwipeRightDone) {
+            tt.chronoSwipeRightDone = true;
+          }
+          tt.chronoSwipeLastTriggeredAt = now;
+          tt.chronoSwipePalmHistory = []; // Reset history after swipe
+        }
+      }
+
+      const chronoSwipeProgress = (tt.chronoSwipeLeftDone ? 0.5 : 0) + (tt.chronoSwipeRightDone ? 0.5 : 0);
+
+      // ======================================================================
+      // v0.6.2: Two-hand gather detection (reuses real gather logic)
+      // ======================================================================
+      let twoHandGatherProgress = 0;
+      let twoHandGatherDistanceXVal = 0;
+      if (twoHandsDetected) {
+        const centers = allLandmarks.map((h: any[]) => {
+          const w = h[0], iMcp = h[5], pMcp = h[17];
+          return {
+            x: (w.x + iMcp.x + pMcp.x) / 3,
+            y: (w.y + iMcp.y + pMcp.y) / 3,
+          };
+        });
+        const a = centers[0], b = centers[1];
+        const leftH = a.x < b.x ? a : b;
+        const rightH = a.x < b.x ? b : a;
+        const distanceX = rightH.x - leftH.x;
+        twoHandGatherDistanceXVal = distanceX;
+        const centerX = (leftH.x + rightH.x) / 2;
+        const centerY = (leftH.y + rightH.y) / 2;
+
+        if (tt.twoHandGatherStartX === null) {
+          if (distanceX >= GATHER_START_MIN_DISTANCE) {
+            tt.twoHandGatherStartX = distanceX;
+            tt.twoHandGatherStartCenterX = centerX;
+            tt.twoHandGatherStartCenterY = centerY;
+            tt.twoHandGatherStartTime = now;
+          }
+        } else {
+          const delta = tt.twoHandGatherStartX - distanceX;
+          const duration = now - tt.twoHandGatherStartTime;
+          const centerDriftX = centerX - (tt.twoHandGatherStartCenterX ?? centerX);
+          const centerDriftY = centerY - (tt.twoHandGatherStartCenterY ?? centerY);
+          const driftOk = Math.abs(centerDriftX) <= TWO_HAND_MAX_CENTER_DRIFT
+            && Math.abs(centerDriftY) <= TWO_HAND_MAX_VERTICAL_DRIFT;
+
+          if (duration >= TWO_HAND_TRANSITION_MIN_DURATION_MS && delta >= 0 && driftOk) {
+            twoHandGatherProgress = Math.min(1, Math.max(0, delta / GATHER_DELTA_THRESHOLD));
+            if (delta >= GATHER_DELTA_THRESHOLD && distanceX <= GATHER_END_MAX_DISTANCE) {
+              tt.twoHandGatherCompleted = true;
+            }
+          }
+
+          if (duration > TWO_HAND_TRANSITION_MAX_DURATION_MS) {
+            tt.twoHandGatherStartX = null;
+          }
+        }
+      } else {
+        tt.twoHandGatherStartX = null;
+      }
+      if (tt.twoHandGatherCompleted) twoHandGatherProgress = 1;
+
+      // Update hand position indicator on camera preview
+      setHandPos({ x: palmCenterX, y: palmCenterY });
+
+      const state: TutorialGestureState = {
+        handDetected: true,
+        twoHandsDetected,
+        rawGesture,
+        stableGesture: rawGesture,
+        openPalmDetected,
+        fistDetected,
+        pinchDetected,
+        rawPinch,
+        pinchPostureOk,
+        pinchRatio: Math.round(bestRatio * 100) / 100,
+        pinchHoldMs: Math.round(pinchHoldMs),
+        handMoveProgress: 0,
+        openPalmOrbitProgress: Math.round(openPalmOrbitProgress * 100) / 100,
+        openPalmOrbitPathLength: Math.round(openPalmOrbitPathLength * 100) / 100,
+        openPalmOrbitVisitedQuadrants: openPalmOrbitVisitedQuadrants,
+        twoHandSpreadProgress: Math.round(twoHandSpreadProgress * 100) / 100,
+        chronoSwipeLeftDetected: tt.chronoSwipeLeftDone,
+        chronoSwipeRightDetected: tt.chronoSwipeRightDone,
+        chronoSwipeProgress: Math.round(chronoSwipeProgress * 100) / 100,
+        chronoSwipeDirection: chronoSwipeDirection,
+        chronoSwipeDeltaX: Math.round(chronoDeltaX * 100) / 100,
+        twoHandGatherProgress: Math.round(twoHandGatherProgress * 100) / 100,
+        twoHandGatherDistanceX: Math.round(twoHandGatherDistanceXVal * 100) / 100,
+        twoHandGatherStartDistanceX: Math.round((tt.twoHandGatherStartX ?? 0) * 100) / 100,
+        lastUpdatedAt: now,
+      };
+
+      cb(state);
+      setGestureStatus(`Tutorial: ${rawGesture} | pinch:${pinchDetected ? 'Y' : 'n'} | orbit:${Math.round(openPalmOrbitProgress * 100)}%`);
+    };
 
     const detectGesture = (landmarks: any[], allLandmarks?: any[][]) => {
       // 0 is Wrist
@@ -1526,7 +1911,7 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   const effectiveDebug = DEBUG_GESTURES || showDebug;
 
   return (
-    <div className="absolute top-6 right-[8%] z-50 flex flex-col items-end pointer-events-none">
+    <div className={`absolute top-6 right-[8%] ${tutorialMode ? 'z-[105]' : 'z-50'} flex flex-col items-end pointer-events-none`}>
 
       {/* v0.5.5: Small debug toggle button */}
       <button

@@ -23,6 +23,8 @@ interface UIOverlayProps {
   chronoMemories: MemoryPhoto[];
   /** v0.4: Whether a memory modal is open */
   selectedMemory: MemoryPhoto | null;
+  /** v0.6: Open gesture onboarding tutorial */
+  onOpenGestureOnboarding?: () => void;
 }
 
 export const UIOverlay: React.FC<UIOverlayProps> = ({
@@ -30,6 +32,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   onEnterChronoStream, onExitChronoStream,
   onPrevMemory, onNextMemory,
   focusIndex, chronoMemories, selectedMemory,
+  onOpenGestureOnboarding,
 }) => {
   const isFormed = mode === TreeMode.FORMED;
   const isChronoStream = mode === TreeMode.CHRONO_STREAM;
@@ -65,14 +68,27 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
         {/* Not Shared View: Show manage memories button */}
         {!isSharedView && (
-          <button
-            onClick={onManageMemories}
-            className="group px-6 py-3 border-2 border-[#D4AF37] bg-black/70 backdrop-blur-md overflow-hidden transition-all duration-500 hover:shadow-[0_0_30px_#D4AF37] hover:border-[#fff] hover:bg-[#D4AF37]/20"
-          >
-            <span className="relative z-10 font-serif text-base md:text-lg text-[#D4AF37] tracking-[0.1em] group-hover:text-white transition-colors whitespace-nowrap">
-              {memoryCount > 0 ? `管理回忆 · ${memoryCount}` : '上传回忆照片'}
-            </span>
-          </button>
+          <>
+            <button
+              onClick={onManageMemories}
+              className="group px-6 py-3 border-2 border-[#D4AF37] bg-black/70 backdrop-blur-md overflow-hidden transition-all duration-500 hover:shadow-[0_0_30px_#D4AF37] hover:border-[#fff] hover:bg-[#D4AF37]/20"
+            >
+              <span className="relative z-10 font-serif text-base md:text-lg text-[#D4AF37] tracking-[0.1em] group-hover:text-white transition-colors whitespace-nowrap">
+                {memoryCount > 0 ? `管理回忆 · ${memoryCount}` : '上传回忆照片'}
+              </span>
+            </button>
+            {/* v0.6: Gesture onboarding tutorial button */}
+            {onOpenGestureOnboarding && (
+              <button
+                onClick={onOpenGestureOnboarding}
+                className="group px-5 py-2 border border-[#D4AF37]/30 bg-black/60 backdrop-blur-md overflow-hidden transition-all duration-300 hover:border-[#D4AF37]/60 hover:bg-[#D4AF37]/10"
+              >
+                <span className="relative z-10 font-serif text-xs text-[#D4AF37]/50 tracking-[0.1em] group-hover:text-[#D4AF37]/80 transition-colors whitespace-nowrap">
+                  手势教学
+                </span>
+              </button>
+            )}
+          </>
         )}
       </div>
 

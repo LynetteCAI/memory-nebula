@@ -4,7 +4,8 @@
 
 ## 📝 版本
 
-**v0.5.5**：Stable Polaroid Identity & Deferred Chrono Transition — 稳定照片身份与延迟时间流过渡（当前）。
+**v0.5.5**：Stable Polaroid Identity & Deferred Chrono Transition — 稳定照片身份与延迟时间流过渡。
+**v0.6**：Gesture Onboarding Tutorial — 首次打开手势教学引导（当前）。
 
 ## 🛠️ 快速开始
 
@@ -113,7 +114,118 @@ v0.3.1-lite：**中心候选 + 捏合打开**（不需要双手锁定）。
 - **v0.5.3** ✅ Nebula Hand Orbit Control Polish：星云手势轨迹球视角控制
 - **v0.5.4** ✅ Chrono Transition Smoothing：星云与时间流切换平滑化
 - **v0.5.5** ✅ Stable Polaroid Identity & Deferred Chrono Transition：稳定照片身份与延迟时间流过渡
-- **v0.6** ⏳ 纪念日终章、信件、音乐、分享
+- **v0.6** ✅ Gesture Onboarding Tutorial：首次打开手势教学引导
+- **v0.6.1** ✅ Gesture Onboarding Flow Polish：教学流程优化（当前）
+- **v0.7** ⏳ 纪念日终章、信件、音乐、分享
+
+## 🖐️ v0.6 Gesture Onboarding Tutorial
+
+v0.6 增加首次打开的手势教学引导。用户第一次访问网站时，会看到一个互动式教学界面，依次学习摄像头手部识别、张手释放星云、移动手掌探索空间、捏合打开回忆、双手展开进入时间流。教学期间系统只检测手势并给出反馈，不触发真实星云或时间流操作。用户可以选择"不再提醒"，该偏好保存在 localStorage；也可以随时通过 UIOverlay 的"手势教学"按钮重新打开。
+
+### 教学步骤（v0.6.1 更新）
+
+1. **摄像头检测** — 将手放到摄像头前，等待系统检测到手
+2. **握拳** — 握紧拳头，收拢记忆核心
+3. **张开手掌** — 从握拳到张开手掌，释放记忆星云
+4. **移动手掌** — 左右/上下移动手掌，探索星云空间
+5. **捏合手指** — 拇指与食指捏合，其余三指自然展开，取出回忆
+6. **展开双手** — 双手从中间向两侧展开，进入时间流
+
+### 技术实现
+
+- **tutorialMode**：`GestureController` 新增 `tutorialMode` 属性。开启后摄像头和 MediaPipe 检测正常运行，但所有业务回调（模式切换、pinch 打开、时间流手势等）均被跳过，只通过 `onTutorialGestureStateChange` 输出手势状态
+- **TutorialGestureState**：独立的教学手势状态类型，包含手部检测、张手/握拳、捏合（raw/pinch/posture/hold）、移动进度、双手展开进度等字段
+- **GestureOnboarding**：全屏玻璃拟态教学卡片，带步骤指示器、进度条、实时手势反馈、手势动画提示、成功状态、"不再提醒"复选框
+- **localStorage 持久化**：key 为 `memory-nebula-hide-gesture-onboarding`，布尔值。访问在 `useEffect` 中完成，仅浏览器环境可用
+- **UIOverlay 入口**：右下角新增"手势教学"按钮，点击后无视 localStorage 偏好强制打开教学
+- **交互隔离**：教学打开时底层 Polaroids 点击、MemoryModal、MemoryManager、时间流切换、星云展开/收拢均被禁用
+
+## 🖐️ v0.6.1 Gesture Onboarding Flow Polish
+
+v0.6.1 优化了手势教学流程。教学步骤不再在识别成功后自动跳转，而是在当前步骤停留并显示成功反馈，由用户手动点击"下一步"。教程新增"握拳"步骤，并将顺序调整为：检测手、握拳、张开手掌、移动手掌、捏合、双手展开。教学中的动作检测复用真实 GestureController 的手势判断逻辑，确保用户在教学中学到的动作与实际交互一致。
+
+### 核心改进
+
+- **取消自动跳转**：步骤识别成功后不再自动进入下一步，用户需手动点击"下一步"。每步完成后显示"成功！你已经完成这个动作。"
+- **新增握拳步骤**：在张开手掌之前增加握拳教学，步骤顺序变为：camera → fist → openPalm → handMove → pinch → twoHandSpread → done
+- **成功状态锁定**：一旦某步骤检测通过，该步骤被标记为完成并锁定，即使手势消失也不会回退。进度条锁定为 100%。
+- **按钮状态区分**：未完成时显示"跳过此步"（次级按钮），完成后显示"下一步"（高亮按钮）
+- **手势复用**：tutorialMode 中 `fistDetected`、`openPalmDetected`、`pinchDetected`、`twoHandSpreadProgress` 的计算使用与真实 `detectGesture` 相同的阈值（手指伸长阈值 1.5x、拇指阈值 1.2x、pinch ratio 阈值 0.5、spread delta 阈值 0.20）
+- **卡片发光提示**：步骤完成时卡片边框从 dim 变为亮金色
+
+## 🖐️ v0.6.2 Gesture Onboarding Extended — Chrono Swipe & Two-Hand Gather
+
+v0.6.2 为手势教学补充了时间流专属手势步骤。教学步骤从 6 步扩展到 8 步（7 个手势 + done 页），新增"左右挥手浏览时间流"和"合拢双手回到记忆星云"两个教学步骤。教学中的 chrono swipe 和 two-hand gather 检测复用 GestureController 中与真实交互完全相同的阈值和逻辑。
+
+### 新增步骤
+
+1. **chronoSwipe（第 7 步）** — 先向左扫一次，再向右扫一次，学习在时间流中浏览回忆。UI 显示左右两个 checklist，分别标记 ✓/○ 状态。完成条件：chronoSwipeLeftDetected && chronoSwipeRightDetected 均为 true。
+2. **twoHandGather（第 8 步）** — 将双手从两侧向中间合拢，学习从时间流回到星云。完成条件：twoHandGatherProgress >= 1。
+
+### 技术实现
+
+- **chronoSwipe 检测**：复用 real 手势的 palm history 追踪逻辑，SWIPE_MIN_DISTANCE=0.18、SWIPE_MAX_DURATION_MS=700、SWIPE_MAX_VERTICAL_DRIFT=0.16。左/右各检测一次后标记完成，progress 从 0 → 0.5（左完成）→ 1.0（右完成）。
+- **twoHandGather 检测**：复用 real 手势的双手距离追踪，GATHER_START_MIN_DISTANCE=0.54、GATHER_DELTA_THRESHOLD=0.20、GATHER_END_MAX_DISTANCE=0.36。progress 从 0 → 1.0 线性映射。
+- **TutorialGestureState 扩展**：新增 chronoSwipeLeftDetected、chronoSwipeRightDetected、chronoSwipeProgress、chronoSwipeDirection、chronoSwipeDeltaX、twoHandGatherProgress、twoHandGatherDistanceX、twoHandGatherStartDistanceX。
+- **步骤直接进度**：chronoSwipe 和 twoHandGather 与 handMove、twoHandSpread 一样使用直接 progress（不需 hold 时间）。
+
+### 完整教学步骤
+
+1. 📷 **摄像头检测** — 将手放到摄像头前
+2. ✊ **握拳** — 收拢记忆核心
+3. 🖐️ **张开手掌** — 释放记忆星云
+4. 👋 **移动手掌** — 探索星云空间
+5. 🤏 **捏合手指** — 取出一段回忆
+6. 🤲 **展开双手** — 进入时间流
+7. 👈👉 **左右挥手** — 浏览时间流回忆
+8. 🙌 **合拢双手** — 回到记忆星云
+
+## 🖐️ v0.6.3 Gesture Onboarding Logic Refinement
+
+v0.6.3 重新梳理了手势教学顺序，使其更贴近真实交互语义：检测手、握拳、张手、张手画圈探索星云、捏合打开回忆、双手展开进入时间流、左右挥手浏览时间流、双手合拢返回星云。教程中的移动手掌步骤升级为张开手掌画圈，需要用户完成更明显的轨迹，不再轻微移动即通过。教学界面也会为摄像头预览和手部检测反馈保留空间，让用户能更直观看到系统正在识别自己的手势。
+
+### 教学步骤（v0.6.3 更新 — 8 个手势 + done）
+
+1. **camera** — 将手放到摄像头前，保持在画面中
+2. **fist** — 握紧拳头，收拢记忆核心；打开回忆时也可握拳关闭
+3. **openPalm** — 张开手掌，释放记忆星云
+4. **openPalmOrbit** — **张开手掌画一个圈**，环绕探索星云（替代原有简单 handMove）
+5. **pinch** — 拇指食指捏合，其余三指自然展开，取出一段回忆
+6. **twoHandSpread** — 双手从中间向两侧展开，进入时间流
+7. **chronoSwipe** — 在时间流中左右挥手，切换上一段/下一段回忆
+8. **twoHandGather** — 双手从两侧向中间合拢，回到记忆星云
+9. **done** — 完成所有手势，开始探索
+
+### openPalmOrbit 画圈检测
+
+- **触发条件**：必须保持 `openPalmDetected === true`（张开手掌）
+- **累计路径长度**（pathLength ≥ 0.55）：追踪手掌中心累计移动距离
+- **水平覆盖**（boundsWidth ≥ 0.18）：追踪左右方向边界宽度
+- **垂直覆盖**（boundsHeight ≥ 0.14）：追踪上下方向边界高度
+- **方向覆盖**（visitedQuadrants ≥ 3）：相对于起始位置至少覆盖 3 个象限
+- **综合进度**：`min(pathLength/0.55, boundsWidth/0.18, boundsHeight/0.14, visitedQuadrants/3)` — 四项指标均需达标
+- **暂停规则**：如果手掌收回（非 open palm），暂停累计但保留已累积数据；再次张开手掌后重置轨迹
+
+### 摄像头预览可见性
+
+- 教学打开时 GestureController 的摄像头预览 z-index 提升至 z-[105]，介于 onboarding 背景层（z-[100]）和教学卡片（z-[110]）之间
+- 用户可以在教学中看到摄像头画面、手势骨架 landmark 和当前手势状态文本
+- 教学卡片居中布局，为右上角摄像头预览留出空间
+
+### 手势检测复用
+
+- `fistDetected` / `openPalmDetected`：复用 1.5x 手指伸长阈值 / 1.2x 拇指阈值
+- `pinchDetected`：复用 `PINCH_RATIO_THRESHOLD = 0.5` + 非捏合手指 1.3x 伸展检查
+- `twoHandSpreadProgress`：复用 `SPREAD_DELTA_THRESHOLD = 0.20`
+- `chronoSwipeLeftDetected/RightDetected`：复用 `SWIPE_MIN_DISTANCE = 0.18`、`SWIPE_MAX_DURATION_MS = 700`、`SWIPE_MAX_VERTICAL_DRIFT = 0.16`
+- `twoHandGatherProgress`：复用 `GATHER_START_MIN_DISTANCE = 0.54`、`GATHER_DELTA_THRESHOLD = 0.20`
+- `openPalmOrbitProgress`：新增轨迹追踪，使用多维度复合指标
+
+### 手动推进
+
+- 所有步骤成功后不自动跳转
+- 成功状态锁定，不受手势状态变化影响
+- 用户点击"下一步"后进入下一步
 
 ## 🖐️ v0.5.5 Stable Polaroid Identity & Deferred Chrono Transition
 

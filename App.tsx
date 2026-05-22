@@ -6,9 +6,12 @@ import { Experience } from './components/Experience';
 import { UIOverlay } from './components/UIOverlay';
 import { GestureController } from './components/GestureController';
 import type { TwoHandTransitionDebugState } from './components/GestureController';
+import { GestureOnboarding } from './components/GestureOnboarding';
 import { MemoryModal } from './components/MemoryModal';
 import { MemoryManager } from './components/MemoryManager';
 import { TreeMode, MemoryPhoto } from './types';
+import type { TutorialGestureState } from './types';
+import { defaultTutorialGestureState } from './types';
 import { compareMemoryByTime } from './utils/memorySort';
 import { shuffleMemoriesForSession } from './utils/memoryShuffle';
 import {
@@ -58,6 +61,9 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
   }
 }
 
+// v0.6: localStorage key for gesture onboarding "don't show again"
+const GESTURE_ONBOARDING_HIDE_KEY = "memory-nebula-hide-gesture-onboarding";
+
 export default function App() {
   const [mode, setMode] = useState<TreeMode>(TreeMode.FORMED);
   const [handPosition, setHandPosition] = useState<{ x: number; y: number; detected: boolean }>({ x: 0.5, y: 0.5, detected: false });
@@ -86,6 +92,10 @@ export default function App() {
 
   // v0.5: Two-hand transition debug state from GestureController
   const [twoHandTransitionState, setTwoHandTransitionState] = useState<TwoHandTransitionDebugState | null>(null);
+
+  // v0.6: Gesture onboarding tutorial state
+  const [showGestureOnboarding, setShowGestureOnboarding] = useState(false);
+  const [tutorialGestureState, setTutorialGestureState] = useState<TutorialGestureState>(defaultTutorialGestureState);
 
   // v0.4.5: Session-level shuffle seed — generated once per page load
   const nebulaShuffleSeedRef = useRef(Date.now());
@@ -120,10 +130,11 @@ export default function App() {
   // v0.3 + v0.3.1: Pause navigation when modal is open
   // v0.4.1: Also pause in Chrono Stream (fixed camera)
   const isChronoMode = mode === TreeMode.CHRONO_STREAM;
-  const gestureNavigationEnabled = selectedMemory === null && !isChronoMode;
+  // v0.6: Disable all business gestures when onboarding tutorial is open
+  const gestureNavigationEnabled = selectedMemory === null && !isChronoMode && !showGestureOnboarding;
   // v0.3.1: Enable gesture photo selection only when modal is NOT open
   // v0.4.1: Also disable in Chrono Stream (no pinch)
-  const gesturePhotoSelectionEnabled = selectedMemory === null && !isChronoMode;
+  const gesturePhotoSelectionEnabled = selectedMemory === null && !isChronoMode && !showGestureOnboarding;
 
   // v0.5.5: Polaroids always render the full stable memories array
   // No mode-switching of displayMemories — each photo keeps its React identity
@@ -136,6 +147,12 @@ export default function App() {
       .then((loaded) => setMemories(loaded))
       .catch((err) => console.error('Failed to load memories from IndexedDB:', err))
       .finally(() => setIsLibraryLoading(false));
+  }, []);
+
+  // v0.6: Check localStorage for gesture onboarding "don't show again"
+  useEffect(() => {
+    const hide = localStorage.getItem(GESTURE_ONBOARDING_HIDE_KEY) === "true";
+    setShowGestureOnboarding(!hide);
   }, []);
 
   // v0.3.4: CRUD handlers — write to IndexedDB then update React state
@@ -208,8 +225,9 @@ export default function App() {
   }, []);
 
   // v0.4: Mouse wheel navigation in Chrono Stream (throttled)
+  // v0.6: Also skip when onboarding is open
   useEffect(() => {
-    if (mode !== TreeMode.CHRONO_STREAM || selectedMemory) return;
+    if (mode !== TreeMode.CHRONO_STREAM || selectedMemory || showGestureOnboarding) return;
 
     let lastWheelTime = 0;
     const WHEEL_COOLDOWN_MS = 400;
@@ -228,12 +246,20 @@ export default function App() {
 
     window.addEventListener('wheel', onWheel, { passive: true });
     return () => window.removeEventListener('wheel', onWheel);
-  }, [mode, selectedMemory, goPrevMemory, goNextMemory]);
+  }, [mode, selectedMemory, showGestureOnboarding, goPrevMemory, goNextMemory]);
+
+  // v0.6: Ref for onboarding state used in key handler to avoid stale closure
+  const showGestureOnboardingRef = useRef(showGestureOnboarding);
+  useEffect(() => { showGestureOnboardingRef.current = showGestureOnboarding; }, [showGestureOnboarding]);
 
   // v0.3.1: Esc key logic: close modal OR clear locked photo
   // v0.4: Extended for Chrono Stream navigation (ArrowLeft/Right, A/D, Esc return)
+  // v0.6: Skip when onboarding is open (onboarding has its own Esc handler)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // v0.6: Don't handle keys when onboarding is open
+      if (showGestureOnboardingRef.current) return;
+
       // v0.4: Chrono Stream navigation (only when no modal open)
       if (mode === TreeMode.CHRONO_STREAM && !selectedMemory) {
         if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
@@ -366,11 +392,12 @@ export default function App() {
   const enterChronoStream = useCallback(() => {
     if (memories.length === 0) return;
     if (selectedMemory) return; // don't enter while modal is open
+    if (showGestureOnboarding) return; // v0.6: don't enter during onboarding
     setCandidateMemory(null);
     setLockedMemory(null);
     setFocusIndex(clampFocusIndex(0));
     setMode(TreeMode.CHRONO_STREAM);
-  }, [memories.length, selectedMemory, clampFocusIndex]);
+  }, [memories.length, selectedMemory, showGestureOnboarding, clampFocusIndex]);
 
   // v0.3.1-lite: Ref for pinch callback to avoid stale closure
   const candidateMemoryRef = useRef<MemoryPhoto | null>(null);
@@ -418,6 +445,18 @@ export default function App() {
     if (!memory) return;
     setSelectedMemory(memory);
     setModalOpenedAt(performance.now()); // v0.3.2: record open time for grace
+  }, []);
+
+  // v0.6: Gesture onboarding callbacks
+  const handleCloseGestureOnboarding = useCallback((dontShowAgain: boolean) => {
+    if (dontShowAgain) {
+      localStorage.setItem(GESTURE_ONBOARDING_HIDE_KEY, "true");
+    }
+    setShowGestureOnboarding(false);
+  }, []);
+
+  const handleOpenGestureOnboarding = useCallback(() => {
+    setShowGestureOnboarding(true);
   }, []);
 
   return (
@@ -476,6 +515,7 @@ export default function App() {
         focusIndex={focusIndex}
         chronoMemories={chronoMemories}
         selectedMemory={selectedMemory}
+        onOpenGestureOnboarding={handleOpenGestureOnboarding}
       />
       
       {/* Loading indicator for shared photos */}
@@ -507,18 +547,29 @@ export default function App() {
         modalOpenedAt={modalOpenedAt}
         onModalCloseGesture={handleModalCloseGesture}
         // v0.4.4: Chrono Stream dedicated gestures
-        chronoGestureEnabled={isChronoMode && selectedMemory === null}
+        chronoGestureEnabled={isChronoMode && selectedMemory === null && !showGestureOnboarding}
         hasChronoFocusMemory={isChronoMode && chronoMemories.length > 0 && !!chronoMemories[focusIndex]}
         onChronoSwipeLeft={goPrevMemory}
         onChronoSwipeRight={goNextMemory}
         onChronoPinchOpen={handleChronoPinchOpen}
-        // v0.5: Two-Hand Chrono Transition
+        // v0.5: Two-Hand Chrono Transition (v0.6: disabled during onboarding)
         onEnterChronoGesture={enterChronoStream}
         onExitChronoGesture={exitChronoStream}
-        chronoTransitionGestureEnabled={selectedMemory === null}
+        chronoTransitionGestureEnabled={selectedMemory === null && !showGestureOnboarding}
         onTwoHandTransitionStateChange={setTwoHandTransitionState}
+        // v0.6: Gesture Onboarding Tutorial
+        tutorialMode={showGestureOnboarding}
+        onTutorialGestureStateChange={setTutorialGestureState}
       />
       
+      {/* v0.6: Gesture Onboarding Tutorial */}
+      <GestureOnboarding
+        open={showGestureOnboarding}
+        tutorialGestureState={tutorialGestureState}
+        onComplete={handleCloseGestureOnboarding}
+        onSkip={handleCloseGestureOnboarding}
+      />
+
       {/* v0.3: Memory Detail Modal — replaces old two-hand photo overlay */}
       <MemoryModal
         memory={selectedMemory}
