@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { TutorialStepId, TutorialGestureState } from '../types';
+import { GestureDemo } from './GestureDemo';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -68,6 +69,8 @@ interface GestureOnboardingProps {
   tutorialGestureState: TutorialGestureState;
   onComplete: (dontShowAgain: boolean) => void;
   onSkip: (dontShowAgain: boolean) => void;
+  /** v0.6.5: Report current step to parent for step-specific gesture detection */
+  onStepChange?: (step: TutorialStepId | undefined) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +82,7 @@ export const GestureOnboarding: React.FC<GestureOnboardingProps> = ({
   tutorialGestureState,
   onComplete,
   onSkip,
+  onStepChange,
 }) => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [dontShowAgain, setDontShowAgain] = useState(false);
@@ -204,6 +208,11 @@ export const GestureOnboarding: React.FC<GestureOnboardingProps> = ({
   useEffect(() => {
     prevStepRef.current = currentStepIndex;
   }, [currentStepIndex]);
+
+  // v0.6.5: Report step changes to parent (for GestureController detection logic)
+  useEffect(() => {
+    onStepChange?.(currentStep?.id);
+  }, [currentStepIndex, onStepChange]);
 
   // ------------------------------------------------------------------
   // Callbacks
@@ -421,12 +430,8 @@ export const GestureOnboarding: React.FC<GestureOnboardingProps> = ({
         {/* Done page */}
         {isDone ? (
           <>
-            {/* Checkmark */}
-            <div className="w-16 h-16 rounded-full border-2 border-[#D4AF37]/60 flex items-center justify-center mb-1">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2">
-                <path d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
+            {/* Gesture demo completion animation */}
+            <GestureDemo step="done" completed />
 
             <h2 className="text-xl font-serif text-[#D4AF37] tracking-wider text-center">
               你已经学会主要手势
@@ -484,8 +489,8 @@ export const GestureOnboarding: React.FC<GestureOnboardingProps> = ({
               {currentStep!.description}
             </p>
 
-            {/* Hand animation */}
-            {renderHandAnimation()}
+            {/* Gesture demo animation */}
+            <GestureDemo step={currentStep!.id} completed={isStepCompleted} compact />
 
             {/* Progress bar — locked at 100% when completed */}
             <div className="w-full h-1 bg-[#D4AF37]/10 rounded-full overflow-hidden">

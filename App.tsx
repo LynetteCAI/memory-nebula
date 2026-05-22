@@ -10,7 +10,7 @@ import { GestureOnboarding } from './components/GestureOnboarding';
 import { MemoryModal } from './components/MemoryModal';
 import { MemoryManager } from './components/MemoryManager';
 import { TreeMode, MemoryPhoto } from './types';
-import type { TutorialGestureState } from './types';
+import type { TutorialGestureState, TutorialStepId } from './types';
 import { defaultTutorialGestureState } from './types';
 import { compareMemoryByTime } from './utils/memorySort';
 import { shuffleMemoriesForSession } from './utils/memoryShuffle';
@@ -96,6 +96,8 @@ export default function App() {
   // v0.6: Gesture onboarding tutorial state
   const [showGestureOnboarding, setShowGestureOnboarding] = useState(false);
   const [tutorialGestureState, setTutorialGestureState] = useState<TutorialGestureState>(defaultTutorialGestureState);
+  // v0.6.5: Track current tutorial step for GestureController step-specific logic
+  const [currentTutorialStep, setCurrentTutorialStep] = useState<TutorialStepId | undefined>(undefined);
 
   // v0.4.5: Session-level shuffle seed — generated once per page load
   const nebulaShuffleSeedRef = useRef(Date.now());
@@ -559,6 +561,7 @@ export default function App() {
         onTwoHandTransitionStateChange={setTwoHandTransitionState}
         // v0.6: Gesture Onboarding Tutorial
         tutorialMode={showGestureOnboarding}
+        tutorialStep={currentTutorialStep}
         onTutorialGestureStateChange={setTutorialGestureState}
       />
       
@@ -568,6 +571,7 @@ export default function App() {
         tutorialGestureState={tutorialGestureState}
         onComplete={handleCloseGestureOnboarding}
         onSkip={handleCloseGestureOnboarding}
+        onStepChange={setCurrentTutorialStep}
       />
 
       {/* v0.3: Memory Detail Modal — replaces old two-hand photo overlay */}

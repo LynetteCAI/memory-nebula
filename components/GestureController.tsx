@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import { TreeMode } from '../types';
-import type { TutorialGestureState } from '../types';
+import type { TutorialGestureState, TutorialStepId } from '../types';
 
 // ---------------------------------------------------------------------------
 // v0.2.1 Gesture Stabilization Constants
@@ -197,6 +197,8 @@ interface GestureControllerProps {
   // --- v0.6 Gesture Onboarding Tutorial ---
   /** When true, run detection but skip all business callbacks. Only emits tutorial state. */
   tutorialMode?: boolean;
+  /** v0.6.5: Current tutorial step (for step-specific detection logic like chrono swipe) */
+  tutorialStep?: TutorialStepId;
   /** Called with tutorial gesture state (throttled ~10fps) */
   onTutorialGestureStateChange?: (state: TutorialGestureState) => void;
 }
@@ -229,6 +231,7 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   onTwoHandTransitionStateChange,
   // v0.6 Tutorial mode
   tutorialMode = false,
+  tutorialStep,
   onTutorialGestureStateChange,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -346,6 +349,10 @@ export const GestureController: React.FC<GestureControllerProps> = ({
 
   // v0.6: Tutorial mode throttle
   const TUTORIAL_EMIT_INTERVAL_MS = 100;
+
+  // v0.6.5: Track tutorial step transitions for step-specific detection
+  const tutorialStepRef = useRef<TutorialStepId | undefined>(undefined);
+  const prevTutorialStepRef = useRef<TutorialStepId | undefined>(undefined);
   
   // -------------------------------------------------------------------------
   // v0.2.1 Stable-hold trigger state (replaces old frame-count debounce)
@@ -500,6 +507,8 @@ export const GestureController: React.FC<GestureControllerProps> = ({
   // v0.6: sync tutorial mode refs
   useEffect(() => { tutorialModeRef.current = tutorialMode; }, [tutorialMode]);
   useEffect(() => { onTutorialGestureStateChangeRef.current = onTutorialGestureStateChange; }, [onTutorialGestureStateChange]);
+  // v0.6.5: sync tutorial step ref
+  useEffect(() => { tutorialStepRef.current = tutorialStep; }, [tutorialStep]);
 
   useEffect(() => {
     let handLandmarker: HandLandmarker | null = null;
@@ -905,8 +914,17 @@ export const GestureController: React.FC<GestureControllerProps> = ({
       }
 
       // ======================================================================
-      // v0.6.2: Chrono swipe detection (reuses real swipe logic & thresholds)
+      // v0.6.5: Chrono swipe detection — fixed false positives & sequential ordering
       // ======================================================================
+      // Reset history when entering the chronoSwipe step (prevents accumulated jitter)
+      if (tutorialStepRef.current === 'chronoSwipe' && prevTutorialStepRef.current !== 'chronoSwipe') {
+        tt.chronoSwipePalmHistory = [];
+        tt.chronoSwipeLeftDone = false;
+        tt.chronoSwipeRightDone = false;
+        tt.chronoSwipeLastTriggeredAt = 0;
+      }
+      prevTutorialStepRef.current = tutorialStepRef.current;
+
       // Prune old history entries
       tt.chronoSwipePalmHistory = tt.chronoSwipePalmHistory.filter(
         e => now - e.time < SWIPE_HISTORY_MAX_AGE_MS
@@ -916,7 +934,6 @@ export const GestureController: React.FC<GestureControllerProps> = ({
 
       let chronoSwipeDirection: 'left' | 'right' | 'none' = 'none';
       let chronoDeltaX = 0;
-      let chronoSwipeThisFrame = false;
 
       if (tt.chronoSwipePalmHistory.length >= 2) {
         const first = tt.chronoSwipePalmHistory[0];
@@ -928,19 +945,21 @@ export const GestureController: React.FC<GestureControllerProps> = ({
         const absDy = Math.abs(dy);
         const inCooldown = (now - tt.chronoSwipeLastTriggeredAt) < SWIPE_COOLDOWN_MS;
 
+        // Match real swipe detection: compare oldest vs newest entry (same as detectGesture)
         if (!inCooldown && absDx >= SWIPE_MIN_DISTANCE && duration >= SWIPE_MIN_DURATION_MS && duration <= SWIPE_MAX_DURATION_MS && absDy < SWIPE_MAX_VERTICAL_DRIFT) {
           const dir = dx < 0 ? 'left' : 'right';
           chronoSwipeDirection = INVERT_CHRONO_SWIPE ? (dir === 'left' ? 'right' : 'left') : dir;
           chronoDeltaX = dx;
-          chronoSwipeThisFrame = true;
 
+          // Enforce left-before-right ordering
           if (chronoSwipeDirection === 'left' && !tt.chronoSwipeLeftDone) {
             tt.chronoSwipeLeftDone = true;
-          } else if (chronoSwipeDirection === 'right' && !tt.chronoSwipeRightDone) {
+            tt.chronoSwipePalmHistory = []; // Reset history after swipe
+          } else if (chronoSwipeDirection === 'right' && tt.chronoSwipeLeftDone && !tt.chronoSwipeRightDone) {
             tt.chronoSwipeRightDone = true;
+            tt.chronoSwipePalmHistory = []; // Reset history after swipe
           }
           tt.chronoSwipeLastTriggeredAt = now;
-          tt.chronoSwipePalmHistory = []; // Reset history after swipe
         }
       }
 

@@ -62,6 +62,87 @@
       .animate-modal-card-out {
         animation: modalCardOut 0.2s ease-in forwards;
       }
+
+      /* ================================================================
+         v0.6.4 Gesture Demo Animations
+         ================================================================ */
+
+      /* ── camera: hand entering frame ── */
+      @keyframes gesture-demo-camera-hand {
+        0%, 100% { transform: translateY(24px); opacity: 0; }
+        15%, 85% { transform: translateY(0); opacity: 1; }
+      }
+      @keyframes gesture-demo-camera-scan {
+        0% { transform: translateY(-100%); opacity: 0.6; }
+        50% { opacity: 0.4; }
+        100% { transform: translateY(100%); opacity: 0.6; }
+      }
+
+      /* ── fist: dots converge ── */
+      @keyframes gesture-demo-fist-in {
+        0% { transform: translateX(var(--gdf-start)) scale(1.2); opacity: 0.6; }
+        100% { transform: translateX(0) scale(1); opacity: 1; }
+      }
+
+      /* ── openPalm: dots spread ── */
+      @keyframes gesture-demo-palm-out {
+        0% { transform: translateX(0) scale(0.8); opacity: 0.4; }
+        100% { transform: translateX(var(--gdp-end)) scale(1); opacity: 1; }
+      }
+
+      /* ── openPalmOrbit: circular motion ── */
+      @keyframes gesture-demo-orbit {
+        0% { transform: rotate(0deg) translateX(28px) rotate(0deg); }
+        100% { transform: rotate(360deg) translateX(28px) rotate(-360deg); }
+      }
+
+      /* ── pinch: thumb+index close, others stay ── */
+      @keyframes gesture-demo-pinch-close {
+        0%, 100% { transform: translateX(0); }
+        50% { transform: translateX(8px); }
+      }
+
+      /* ── twoHandSpread ── */
+      @keyframes gesture-demo-spread-left {
+        0%, 100% { transform: translateX(0); }
+        50% { transform: translateX(-24px); }
+      }
+      @keyframes gesture-demo-spread-right {
+        0%, 100% { transform: translateX(0); }
+        50% { transform: translateX(24px); }
+      }
+
+      /* ── chronoSwipe ── */
+      @keyframes gesture-demo-swipe {
+        0%, 100% { transform: translateX(-28px); opacity: 0.5; }
+        25% { transform: translateX(0); opacity: 1; }
+        50% { transform: translateX(28px); opacity: 0.5; }
+        75% { transform: translateX(0); opacity: 1; }
+      }
+
+      /* ── twoHandGather ── */
+      @keyframes gesture-demo-gather-left {
+        0%, 100% { transform: translateX(-24px); }
+        50% { transform: translateX(0); }
+      }
+      @keyframes gesture-demo-gather-right {
+        0%, 100% { transform: translateX(24px); }
+        50% { transform: translateX(0); }
+      }
+
+      /* ── done: success glow ── */
+      @keyframes gesture-demo-glow {
+        0%, 100% { box-shadow: 0 0 8px rgba(212,175,55,0.2); }
+        50% { box-shadow: 0 0 24px rgba(212,175,55,0.5); }
+      }
+      @keyframes gesture-demo-float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-4px); }
+      }
+      @keyframes gesture-demo-check {
+        0% { stroke-dashoffset: 30; }
+        100% { stroke-dashoffset: 0; }
+      }
     </style>
   <script type="importmap">
 {
