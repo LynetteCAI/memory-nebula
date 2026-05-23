@@ -37,25 +37,16 @@ lerna-debug.log*
 *.local
 .claude/
 
-# coverage
-coverage/
-
 # backup files
 *.backup
 *.backup.*
 package-lock.backup.json
-
-# local memory exports / backups
 memory-nebula-backup-*.json
 memory-backup-*.json
-
-# public assets
-public/photos/*
-!public/photos/.gitkeep
 memories-backup-*.json
 *.memory-export.json
 
-# local photo data
+# local photo data (user-uploaded images, not project assets)
 public/photos/*
 !public/photos/.gitkeep
 *.jpg
@@ -71,3 +62,42 @@ public/models/*.task
 # vercel
 .vercel
 .env*.local
+
+# temp / cache
+tmp/
+.temp/
+*.swp
+*.swo
+*~
+
+# TypeScript
+*.tsbuildinfo
+
+# test output
+.vite/test/
+
+# dev / debug
+dev/
+debug/
+
+# private user data directories — add any local-only folders here
+# (avoid global extension ignores that could block project assets)
+private/
+local-data/
+uploads/
+exports/
+backups/
+.user-data/
+
+# private keys / certs (additional safety)
+*.pem
+*.key
+*.p12
+*.pfx
+*.cert
+*.crt
+*.der
+*.p8
+*.pkcs8
+
+# (backup patterns defined above in the #backup section)

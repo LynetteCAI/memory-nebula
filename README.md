@@ -1,259 +1,44 @@
 # 🌌 Memory Nebula
 
-Memory Nebula 是一个基于 **React + Three.js + MediaPipe** 的 3D 互动回忆空间。  
-用户可以上传照片与回忆文字，将它们组织成可探索的记忆星云；通过手势可以展开星云、选中照片、进入时间流，并按时间顺序浏览回忆。
-
-项目适合作为纪念日、情侣回忆、旅行记录、家庭相册等互动展示页面。
+> **A heavily modified public reference fork of [blackboxo/christmas-tree](https://github.com/blackboxo/christmas-tree)**  
+> 基于 [blackboxo/christmas-tree](https://github.com/blackboxo/christmas-tree) 的大规模改造参考版本
 
 ---
 
-## ✨ 功能特性
+**Language / 语言：**
 
-- 🌌 **记忆星云**：照片、星尘、恒星系统组成可探索的 3D 星云空间
-- 🖐️ **手势交互**：支持握拳、张手、移动手掌、捏合、左右挥手、双手展开/合拢
-- 📸 **拍立得照片**：照片以拍立得卡片形式漂浮在星云中
-- 📝 **回忆详情**：每张照片可保存标题、日期、地点、描述和故事
-- 🌊 **时间流模式**：按日期将回忆重排为时间长河
-- 🧭 **首次手势教学**：首次打开会引导用户练习主要手势
-- 💾 **本地持久化**：照片和回忆信息保存在浏览器 IndexedDB 中
-- 📤 **导入/导出**：支持 JSON 备份与恢复本地回忆数据
+- [English](./README.en.md)
+- [中文](./README.zh-CN.md)
 
 ---
 
-## 🚀 快速开始
+## Notice / 说明
 
-### 1. 克隆项目
+This repository is a **heavily modified fork** of:
 
-```bash
-git clone <repository-url>
-cd <repository-folder>
-```
+https://github.com/blackboxo/christmas-tree
 
-### 2. 安装依赖
+The upstream repository **did not include an explicit open-source license** at the time this fork was created.
 
-建议使用 Node.js 20+。
-
-```bash
-npm install
-```
-
-### 3. 启动开发环境
-
-```bash
-npm run dev
-```
-
-默认访问：
-
-```bash
-http://localhost:3010
-```
-
-打开网页后，请允许浏览器访问摄像头，以启用手势识别。
-
-首次运行时，`npm install` 会自动通过 `postinstall` 脚本下载 MediaPipe 手势模型（`hand_landmarker.task`）。如果自动下载失败，可以手动运行：
-
-```bash
-npm run download-model
-```
+This repository is published to **preserve development history, document modifications, and provide deployment/reference materials**. Original copyright belongs to the original author(s). This repository **should not be interpreted as relicensing the original project**.
 
 ---
 
-## 📦 构建部署
+本仓库是基于以下项目的**大规模改造版本**：
 
-### 构建生产版本
+https://github.com/blackboxo/christmas-tree
 
-```bash
-npm run build
-```
+在创建本 fork 时，**原上游仓库没有包含明确的开源许可证文件**。
 
-构建产物会生成在：
-
-```bash
-dist/
-```
-
-### 本地预览构建结果
-
-如果项目中配置了 Vite preview：
-
-```bash
-npm run preview
-```
-
-### 部署
-
-可以将 `dist/` 部署到任意静态网站服务，例如：
-
-* Vercel
-* Netlify
-* Cloudflare Pages
-* GitHub Pages
-* Nginx 静态站点
+本仓库公开的目的主要是**保留开发历史、记录本人修改内容，并提供部署和参考材料**。原项目相关代码版权归原作者所有。**本仓库不代表对原项目进行重新授权**。
 
 ---
 
-## 🎮 使用方式
+Please see the language-specific README for full documentation.  
+完整文档请查看对应语言版本的 README。
 
-### 1. 首次进入
-
-首次打开网站会出现手势教学，引导用户练习：
-
-1. 伸出一只手
-2. 握拳
-3. 张开手掌
-4. 张开手掌画圈
-5. 捏合拇指和食指
-6. 双手展开
-7. 左右挥手
-8. 双手合拢
-
-可以勾选 **不再提醒**，之后再次打开不会自动显示教学。
-也可以在页面中点击 **手势教学** 重新打开。
-
----
-
-### 2. 管理回忆
-
-点击 **管理回忆**，可以：
-
-* 上传照片
-* 填写标题、日期、地点、描述和故事
-* 编辑已有回忆
-* 删除单条回忆
-* 批量删除
-* 导出 JSON 备份
-* 导入 JSON 恢复数据
-
-照片和信息会保存在当前浏览器的 IndexedDB 中。
-
-> 注意：数据只保存在当前浏览器。清除浏览器数据、更换浏览器或更换设备后，数据不会自动同步。建议定期导出 JSON 备份。
-
----
-
-## 🖐️ 手势说明
-
-### 星云模式
-
-| 手势          | 作用                   |
-| ----------- | -------------------- |
-| 握拳          | 收拢星云核心；打开照片详情时用于关闭详情 |
-| 张开手掌        | 展开记忆星云               |
-| 张开手掌移动 / 画圈 | 环绕探索星云视角             |
-| 捏合拇指和食指     | 打开当前选中的照片            |
-| 双手向两侧展开     | 进入时间流模式              |
-
-### 时间流模式
-
-| 手势      | 作用            |
-| ------- | ------------- |
-| 左扫 / 右扫 | 切换上一段 / 下一段回忆 |
-| 捏合拇指和食指 | 打开当前焦点照片      |
-| 握拳      | 打开照片详情时关闭详情   |
-| 双手向中间合拢 | 退出时间流，回到星云    |
-
----
-
-## 🖱️ 鼠标与键盘操作
-
-即使不使用手势，也可以用鼠标和键盘操作：
-
-| 操作            | 作用            |
-| ------------- | ------------- |
-| 鼠标拖拽          | 旋转视角          |
-| 鼠标滚轮          | 缩放 / 时间流中切换照片 |
-| 点击照片          | 打开回忆详情        |
-| Esc           | 关闭弹窗 / 退出时间流  |
-| ← / → 或 A / D | 时间流中切换照片      |
-
----
-
-## 🌊 时间流模式
-
-在星云展开后，可以点击 **进入时间流**，或使用双手展开手势。
-
-时间流会将所有回忆按照日期排序：
-
-* 当前照片位于中央
-* 前后照片沿时间流排列
-* 可用左右键、滚轮、按钮或左右挥手切换
-* 可点击或捏合打开当前照片详情
-* 可点击 **回到星云** 或双手合拢返回星云模式
-
----
-
-## 💾 数据保存说明
-
-本项目默认使用浏览器本地存储：
-
-| 数据       | 保存位置         |
-| -------- | ------------ |
-| 照片与回忆信息  | IndexedDB    |
-| 是否隐藏手势教学 | localStorage |
-
-本地数据不会上传服务器。
-如需迁移数据，请使用 **导出 JSON** 和 **导入 JSON** 功能。
-
----
-
-## 📖 Documentation
-
-- [Architecture](./docs/architecture.md) — Codebase structure and component overview
-- [Gesture System](./docs/gestures.md) — All gesture controls and detection details
-- [Storage](./docs/storage.md) — IndexedDB and localStorage implementation
-- [Deployment](./docs/deployment.md) — Build, preview, and deploy instructions
-- [Cloud Sharing](./docs/cloud-sharing.md) — Optional R2/KV sharing setup
-
----
-
-## 🧪 常用命令
-
-```bash
-# 启动开发环境
-npm run dev
-
-# 构建生产版本
-npm run build
-
-# 预览生产构建
-npm run preview
-```
-
----
-
-## 🔧 常见问题
-
-### 摄像头没有反应
-
-请确认：
-
-1. 浏览器已允许摄像头权限
-2. 当前页面使用 `localhost` 或 HTTPS
-3. 没有其他程序占用摄像头
-4. 刷新页面后重新授权
-
-### 手势识别不稳定
-
-建议：
-
-1. 保持手在摄像头画面中央
-2. 避免背景过暗或过亮
-3. 做动作时稍微放慢
-4. 先完成手势教学再进入主体验
-
-### 刷新后照片还在吗？
-
-同一浏览器中会保留。
-如果清除网站数据、换浏览器或换设备，数据不会自动同步。请使用 JSON 导出备份。
-
----
-
-##  隐私说明
-
-本项目默认在浏览器本地运行，数据保存在 IndexedDB 和 localStorage。详情见 [PRIVACY.md](PRIVACY.md)。
-
----
-
-## 📄 License
-
-[MIT](LICENSE)
+| File | Language |
+|------|----------|
+| [README.en.md](./README.en.md) | English |
+| [README.zh-CN.md](./README.zh-CN.md) | 中文 |
+| [CHANGES.md](./CHANGES.md) | Changes from upstream / 相比上游的主要变化 |

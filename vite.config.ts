@@ -26,10 +26,11 @@ export default defineConfig(({ mode }) => {
         }
       },
       plugins: [react()],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
+      // NOTE: GEMINI_API_KEY define is removed because it would bundle the key
+      // into the client-side JS, causing a security leak.
+      // If Gemini AI features are needed in the future, route calls through a
+      // backend proxy (e.g. Vercel Serverless Function in api/) instead of
+      // exposing API keys in the frontend bundle.
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
