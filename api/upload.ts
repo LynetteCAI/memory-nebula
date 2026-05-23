@@ -11,7 +11,7 @@ const s3Client = new S3Client({
   },
 });
 
-const BUCKET_NAME = 'christmas-tree-photos';
+const BUCKET_NAME = process.env.CLOUDFLARE_R2_BUCKET_NAME || 'memory-nebula-photos';
 const KV_NAMESPACE_ID = process.env.CLOUDFLARE_KV_NAMESPACE_ID || '';
 const KV_API_TOKEN = process.env.CLOUDFLARE_KV_API_TOKEN || '';
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || '';

@@ -6,7 +6,7 @@
  * Deterministic sphere distribution functions for the Memory Nebula Core.
  * 
  * In TreeMode.FORMED (Memory Core aggregated state), all elements collapse
- * into a tight, luminous nebula sphere instead of a Christmas tree cone.
+ * into a tight, luminous nebula sphere.
  * Positions are generated deterministically using Fibonacci sphere / golden angle
  * algorithms so they remain stable across renders.
  */
@@ -230,7 +230,7 @@ export function getNebulaPhotoPosition(
 
 /**
  * Nebula color palette - deep space memory theme.
- * Replaces the Christmas red/green palette.
+ * Deep space nebula palette.
  */
 export const NEBULA_COLORS = {
   deepBlue: new THREE.Color('#0a1a3a'),

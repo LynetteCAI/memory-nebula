@@ -12,7 +12,7 @@ const s3Client = new S3Client({
   },
 });
 
-const BUCKET_NAME = 'christmas-tree-photos';
+const BUCKET_NAME = process.env.CLOUDFLARE_R2_BUCKET_NAME || 'memory-nebula-photos';
 const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || '';
 
 export default async function handler(req: any, res: any) {

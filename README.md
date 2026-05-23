@@ -51,6 +51,12 @@ http://localhost:3010
 
 打开网页后，请允许浏览器访问摄像头，以启用手势识别。
 
+首次运行时，`npm install` 会自动通过 `postinstall` 脚本下载 MediaPipe 手势模型（`hand_landmarker.task`）。如果自动下载失败，可以手动运行：
+
+```bash
+npm run download-model
+```
+
 ---
 
 ## 📦 构建部署
@@ -270,6 +276,12 @@ npm run preview
 
 ---
 
+## 🔒 隐私说明
+
+本项目默认在浏览器本地运行，数据保存在 IndexedDB 和 localStorage。详情见 [PRIVACY.md](PRIVACY.md)。
+
+---
+
 ## 📄 License
 
-MIT
+[MIT](LICENSE)

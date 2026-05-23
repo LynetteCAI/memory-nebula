@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { Foliage } from './Foliage';
 import { Ornaments } from './Ornaments';
 import { Polaroids } from './Polaroids';
-import { TreeStar } from './TreeStar';
+
 import { ChronoStreamRibbon } from './ChronoStreamRibbon';
 import { TreeMode, MemoryPhoto } from '../types';
 
@@ -342,8 +342,7 @@ export const Experience: React.FC<ExperienceProps> = ({
           nebulaOrderById={nebulaOrderById}
           chronoOrderById={chronoOrderById}
         />
-        {/* <TreeStar mode={mode} /> */}
-        
+
         {/* v0.5.4: Chrono Stream time ribbon — always mounted, visible toggle to avoid geometry recreation */}
         <ChronoStreamRibbon
           memoryCount={uploadedPhotos.length}
