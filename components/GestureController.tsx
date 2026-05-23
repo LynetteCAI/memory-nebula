@@ -1,4 +1,29 @@
 
+/**
+ * GestureController — MediaPipe-based hand gesture recognition.
+ *
+ * This file is the largest in the project (~2070 lines) and contains:
+ *
+ * - MediaPipe HandLandmarker setup and model loading
+ * - Webcam lifecycle (start / stop / restart)
+ * - Hand gesture classification (fist, open palm, none)
+ * - Pinch detection (thumb-index finger distance ratio)
+ * - Swipe detection (palm position history over time)
+ * - Two-hand transition detection (spread → enter Chrono, gather → exit Chrono)
+ * - Tutorial mode state tracking (reuses real detection logic)
+ * - Debug HUD overlay (conditionally rendered via DEBUG_GESTURES flag)
+ *
+ * Future refactoring could split this into:
+ *   hooks/useHandLandmarker.ts
+ *   hooks/useWebcam.ts
+ *   gestures/classifyHandGesture.ts
+ *   gestures/pinch.ts
+ *   gestures/swipe.ts
+ *   gestures/twoHandTransition.ts
+ *   components/CameraPreview.tsx
+ *   components/GestureDebugHUD.tsx
+ */
+
 import React, { useEffect, useRef, useState } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import { TreeMode } from '../types';

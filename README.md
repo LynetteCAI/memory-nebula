@@ -196,30 +196,13 @@ npm run preview
 
 ---
 
-## 🧩 推荐目录结构
+## 📖 Documentation
 
-```bash
-components/
-  GestureController.tsx     # 摄像头与手势识别
-  GestureOnboarding.tsx     # 首次手势教学
-  GestureDemo.tsx           # 教学手势动画
-  Polaroids.tsx             # 3D 拍立得照片
-  MemoryModal.tsx           # 回忆详情弹窗
-  MemoryManager.tsx         # 回忆管理器
-  Experience.tsx            # 3D 场景入口
-  UIOverlay.tsx             # 页面 UI
-
-utils/
-  nebulaLayout.ts           # 星云聚合布局
-  constellationLayout.ts    # 星云展开布局
-  chronoStreamLayout.ts     # 时间流布局
-  memorySort.ts             # 时间排序
-  memoryShuffle.ts          # 星云随机编排
-  imageUtils.ts             # 图片压缩
-
-storage/
-  memoryLibraryStore.ts     # IndexedDB 存储
-```
+- [Architecture](./docs/architecture.md) — Codebase structure and component overview
+- [Gesture System](./docs/gestures.md) — All gesture controls and detection details
+- [Storage](./docs/storage.md) — IndexedDB and localStorage implementation
+- [Deployment](./docs/deployment.md) — Build, preview, and deploy instructions
+- [Cloud Sharing](./docs/cloud-sharing.md) — Optional R2/KV sharing setup
 
 ---
 
@@ -265,18 +248,7 @@ npm run preview
 
 ---
 
-## 🗺️ 后续计划
-
-* 云端分享链接
-* 背景音乐
-* 纪念日终章
-* 信件模式
-* 更多时间流视觉效果
-* 移动端适配优化
-
----
-
-## 🔒 隐私说明
+##  隐私说明
 
 本项目默认在浏览器本地运行，数据保存在 IndexedDB 和 localStorage。详情见 [PRIVACY.md](PRIVACY.md)。
 

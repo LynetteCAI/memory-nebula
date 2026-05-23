@@ -48,6 +48,10 @@ package-lock.backup.json
 # local memory exports / backups
 memory-nebula-backup-*.json
 memory-backup-*.json
+
+# public assets
+public/photos/*
+!public/photos/.gitkeep
 memories-backup-*.json
 *.memory-export.json
 
